@@ -1,0 +1,87 @@
+name: Observabilidade
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Acao
+        required: true
+        type: choice
+        options: [validate, deploy, destroy]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oficina360-observabilidade
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  CLUSTER_NAME: oficina360
+  NAMESPACE: observability
+
+jobs:
+  observability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - name: Helm repository
+        run: |
+          helm repo add grafana https://grafana.github.io/helm-charts --force-update
+          helm repo update
+      - name: Validate
+        if: inputs.action == 'validate'
+        run: |
+          for chart in loki alloy grafana; do
+            helm template "$chart" "grafana/$chart" --namespace "$NAMESPACE" \
+              -f "k8s/observabilidade/${chart}-values.yaml" > "/tmp/${chart}.yaml"
+          done
+          kubectl apply --dry-run=client --validate=false -f k8s/grafana/dashboard-oficina360.yaml
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+        if: inputs.action == 'deploy' || inputs.action == 'destroy'
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Configure cluster
+        if: inputs.action == 'deploy' || inputs.action == 'destroy'
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
+      - name: Deploy
+        if: inputs.action == 'deploy'
+        env:
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic grafana-admin -n "$NAMESPACE" \
+            --from-literal=admin-user=admin \
+            --from-literal=admin-password="$GRAFANA_ADMIN_PASSWORD" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f k8s/grafana/dashboard-oficina360.yaml
+          helm upgrade --install loki grafana/loki -n "$NAMESPACE" -f k8s/observabilidade/loki-values.yaml --wait --timeout 12m
+          helm upgrade --install alloy grafana/alloy -n "$NAMESPACE" -f k8s/observabilidade/alloy-values.yaml --wait --timeout 10m
+          helm upgrade --install grafana grafana/grafana -n "$NAMESPACE" -f k8s/observabilidade/grafana-values.yaml --wait --timeout 10m
+      - name: Destroy
+        if: inputs.action == 'destroy'
+        run: |
+          helm uninstall grafana -n "$NAMESPACE" || true
+          helm uninstall alloy -n "$NAMESPACE" || true
+          helm uninstall loki -n "$NAMESPACE" || true
+          kubectl delete namespace "$NAMESPACE" --ignore-not-found=true || true
+      - name: Diagnostics file
+        if: always() && inputs.action != 'validate'
+        run: |
+          {
+            helm list -n "$NAMESPACE" || true
+            kubectl get all -n "$NAMESPACE" -o wide || true
+            kubectl get events -n "$NAMESPACE" --sort-by=.lastTimestamp || true
+          } > observability-diagnostics.txt 2>&1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && inputs.action != 'validate'
+        with:
+          name: observability-diagnostics
+          path: observability-diagnostics.txt
+          retention-days: 1

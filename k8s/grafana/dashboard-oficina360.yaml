@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-oficina360
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  oficina360.json: |-
+    {
+      "title": "Oficina360 - Logs",
+      "uid": "oficina360-logs",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "10s",
+      "time": {"from": "now-1h", "to": "now"},
+      "panels": [
+        {
+          "id": 1,
+          "type": "logs",
+          "title": "Logs da API",
+          "gridPos": {"h": 12, "w": 24, "x": 0, "y": 0},
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {"type": "loki", "uid": "loki"},
+              "expr": "{namespace=\"oficina360\"}"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Erros por minuto",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {"type": "loki", "uid": "loki"},
+              "expr": "sum(count_over_time({namespace=\"oficina360\"} |~ \"(?i)error|exception|failed\" [1m])) or vector(0)"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "Volume de logs por minuto",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {"type": "loki", "uid": "loki"},
+              "expr": "sum(count_over_time({namespace=\"oficina360\"}[1m]))"
+            }
+          ]
+        }
+      ]
+    }

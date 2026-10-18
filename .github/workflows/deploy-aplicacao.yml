@@ -1,0 +1,166 @@
+name: Aplicacao
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Acao
+        required: true
+        type: choice
+        options:
+          - validate
+          - deploy
+          - destroy
+      image:
+        description: Imagem Docker Hub com tag Git SHA ou digest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oficina360-aplicacao
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  CLUSTER_NAME: oficina360
+  NAMESPACE: oficina360
+
+jobs:
+  application:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validar imagem
+        if: inputs.action == 'deploy'
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then
+            exit 0
+          fi
+
+          if [[ ! "$IMAGE" =~ :[0-9a-f]{7,40}$ ]]; then
+            echo "::error::Use uma imagem com tag Git SHA ou digest sha256."
+            exit 1
+          fi
+
+      - name: Validar manifests
+        if: inputs.action == 'validate'
+        env:
+          IMAGE: docker.io/michaelhion/oficina360-api:0123456
+        run: |
+          set -euo pipefail
+
+          kubectl apply --dry-run=client --validate=false \
+            -f k8s/aws/namespace.yaml \
+            -f k8s/aws/api-service.yaml
+
+          envsubst '${IMAGE}' < k8s/aws/api-deployment.yaml \
+            | kubectl apply --dry-run=client --validate=false -f -
+
+      - name: Configurar credenciais AWS
+        if: inputs.action == 'deploy' || inputs.action == 'destroy'
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configurar cluster
+        if: inputs.action == 'deploy' || inputs.action == 'destroy'
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$CLUSTER_NAME"
+
+      - name: Deploy
+        if: inputs.action == 'deploy'
+        env:
+          IMAGE: ${{ inputs.image }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: |
+          set -euo pipefail
+
+          DB_HOST="$(aws ssm get-parameter \
+            --name '/oficina360/database/host' \
+            --query 'Parameter.Value' \
+            --output text)"
+
+          DB_PORT="$(aws ssm get-parameter \
+            --name '/oficina360/database/port' \
+            --query 'Parameter.Value' \
+            --output text)"
+
+          DB_NAME="$(aws ssm get-parameter \
+            --name '/oficina360/database/name' \
+            --query 'Parameter.Value' \
+            --output text)"
+
+          kubectl apply -f k8s/aws/namespace.yaml
+
+          kubectl create configmap oficina360-config \
+            --namespace "$NAMESPACE" \
+            --from-literal=SPRING_PROFILES_ACTIVE=aws \
+            --from-literal=DB_HOST="$DB_HOST" \
+            --from-literal=DB_PORT="$DB_PORT" \
+            --from-literal=DB_NAME="$DB_NAME" \
+            --from-literal=SERVER_PORT=8081 \
+            --dry-run=client -o yaml \
+            | kubectl apply -f -
+
+          kubectl create secret generic oficina360-secret \
+            --namespace "$NAMESPACE" \
+            --from-literal=DB_USERNAME="$DB_USERNAME" \
+            --from-literal=DB_PASSWORD="$DB_PASSWORD" \
+            --from-literal=JWT_SECRET="$JWT_SECRET" \
+            --dry-run=client -o yaml \
+            | kubectl apply -f -
+
+          export IMAGE
+          envsubst '${IMAGE}' < k8s/aws/api-deployment.yaml \
+            > /tmp/api-deployment.yaml
+
+          kubectl apply -f /tmp/api-deployment.yaml
+          kubectl apply -f k8s/aws/api-service.yaml
+
+          kubectl rollout status deployment/oficina360-api \
+            --namespace "$NAMESPACE" \
+            --timeout=5m
+
+      - name: Destroy
+        if: inputs.action == 'destroy'
+        run: |
+          kubectl delete namespace "$NAMESPACE" \
+            --ignore-not-found=true
+
+      - name: Gerar diagnostico
+        if: always() && inputs.action != 'validate'
+        run: |
+          {
+            echo '===== WORKLOADS ====='
+            kubectl get all -n "$NAMESPACE" -o wide || true
+            echo
+            echo '===== EVENTS ====='
+            kubectl get events -n "$NAMESPACE" \
+              --sort-by=.lastTimestamp || true
+          } > application-diagnostics.txt 2>&1
+
+      - name: Publicar diagnostico
+        if: always() && inputs.action != 'validate'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: application-diagnostics
+          path: application-diagnostics.txt
+          if-no-files-found: warn
+          retention-days: 1

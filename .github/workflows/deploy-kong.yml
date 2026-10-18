@@ -1,0 +1,111 @@
+name: Deploy Kong
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Acao
+        required: true
+        type: choice
+        options:
+          - validate
+          - deploy
+          - destroy
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oficina360-kong
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  CLUSTER_NAME: oficina360
+
+jobs:
+  kong:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+
+      - name: Configurar repositorio Helm
+        run: |
+          helm repo add kong https://charts.konghq.com --force-update
+          helm repo update
+
+      - name: Validar chart e Ingress
+        if: inputs.action == 'validate'
+        run: |
+          set -euo pipefail
+          helm template kong kong/kong \
+            --namespace kong \
+            -f k8s/kong/values.yaml >/tmp/kong.yaml
+          test -s /tmp/kong.yaml
+          test -s k8s/kong/api-ingress.yaml
+
+      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+        if: inputs.action == 'deploy' || inputs.action == 'destroy'
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configurar kubectl
+        if: inputs.action == 'deploy' || inputs.action == 'destroy'
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$CLUSTER_NAME"
+          kubectl get nodes
+
+      - name: Deploy
+        if: inputs.action == 'deploy'
+        run: |
+          set -euo pipefail
+          kubectl create namespace kong \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          helm upgrade --install kong kong/kong \
+            --namespace kong \
+            -f k8s/kong/values.yaml \
+            --wait --timeout 10m
+
+          kubectl apply -f k8s/kong/api-ingress.yaml
+          kubectl get pods -n kong
+          kubectl get svc -n kong
+
+      - name: Destroy
+        if: inputs.action == 'destroy'
+        run: |
+          kubectl delete -f k8s/kong/api-ingress.yaml \
+            --ignore-not-found=true || true
+          helm uninstall kong -n kong || true
+          kubectl delete namespace kong --ignore-not-found=true || true
+
+      - name: Diagnostico
+        if: always() && inputs.action != 'validate'
+        run: |
+          {
+            echo "===== RELEASES ====="
+            helm list -n kong || true
+            echo
+            echo "===== PODS ====="
+            kubectl get pods -n kong -o wide || true
+            echo
+            echo "===== SERVICES ====="
+            kubectl get svc -n kong || true
+            echo
+            echo "===== EVENTS ====="
+            kubectl get events -n kong --sort-by=.lastTimestamp || true
+          } > kong-diagnostics.txt 2>&1
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && inputs.action != 'validate'
+        with:
+          name: kong-diagnostics
+          path: kong-diagnostics.txt
+          retention-days: 1

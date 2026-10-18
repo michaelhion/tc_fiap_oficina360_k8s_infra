@@ -1,0 +1,10 @@
+env:
+  database: "off"
+
+# O Kong e a entrada publica da API, entao o LoadBalancer fica aberto para a
+# internet. Para restringir, use proxy.loadBalancerSourceRanges (nao a raiz).
+proxy:
+  type: LoadBalancer
+
+ingressController:
+  enabled: true

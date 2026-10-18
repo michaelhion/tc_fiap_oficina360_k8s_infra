@@ -1,0 +1,115 @@
+# Oficina360 - Infraestrutura AWS
+
+Infraestrutura como código da Oficina360 para o laboratório da Fase 3.
+
+## Arquitetura
+
+```text
+Internet
+   |
+   v
+Kong (LoadBalancer no EKS)
+   |---------------------> API Spring Boot no EKS
+   |                              |
+   |                              v
+   |                         RDS PostgreSQL
+   |
+   +---- /auth -----------> API Gateway/SAM -> Lambda Java
+
+Alloy -> Loki -> Grafana
+          todos no mesmo EKS, em namespaces separados
+```
+
+## Responsabilidades deste repositório
+
+- Terraform: VPC, EKS, node group, RDS e Security Groups.
+- Kubernetes/Helm: API, Kong, Loki, Alloy e Grafana.
+- GitHub Actions: validate, deploy e destroy da plataforma.
+
+A imagem da API é pública no Docker Hub. A Lambda possui repositório e pipeline próprios.
+
+## Estrutura
+
+```text
+.github/workflows/       pipelines manuais
+terraform/lab/           infraestrutura AWS
+k8s/aws/                 API no EKS
+k8s/kong/                gateway e rota da API
+k8s/observabilidade/     values Helm
+k8s/grafana/             dashboard provisionado
+scripts/                 validação e diagnóstico
+```
+
+## Pré-requisitos no GitHub
+
+Secrets:
+
+```text
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+AWS_SESSION_TOKEN
+DB_USERNAME
+DB_PASSWORD
+JWT_SECRET
+GRAFANA_ADMIN_PASSWORD
+```
+
+Repository Variable:
+
+```text
+AWS_REGION=us-east-1
+```
+
+## Validar localmente
+
+```bash
+bash scripts/validate-platform.sh
+```
+
+## Ordem de deploy
+
+1. Execute `Infrastructure Apply`.
+2. Execute `Aplicacao` com ação `deploy` e informe a imagem Docker Hub.
+3. Implante a Lambda pelo repositório próprio.
+4. Execute `Kong` com ação `deploy`.
+5. Execute `Observabilidade` com ação `deploy`.
+
+Os workflows são manuais. Escolher `deploy` e clicar em **Run workflow** já é a confirmação. Não existe segunda confirmação para deploy.
+
+## Ordem de destruição
+
+1. Destrua a stack SAM da Lambda no repositório próprio.
+2. Execute `Observabilidade` com ação `destroy`.
+3. Execute `Kong` com ação `destroy`.
+4. Execute `Aplicacao` com ação `destroy`.
+5. Execute `Infrastructure Destroy`.
+
+A confirmação textual `DESTROY` deve existir apenas para a destruição total da infraestrutura.
+
+## Diagnósticos
+
+Cada workflow salva o diagnóstico em arquivo `.txt` e publica o arquivo como **Artifact** da execução no GitHub Actions.
+
+Caminho no GitHub:
+
+```text
+Actions -> execução do workflow -> Artifacts
+```
+
+Os artifacts estão configurados com `retention-days: 3`, portanto são removidos automaticamente após três dias.
+
+## Grafana
+
+O datasource Loki e o dashboard `Oficina360 - Logs` são provisionados automaticamente. O dashboard inclui:
+
+- logs do namespace `oficina360`;
+- erros por minuto;
+- volume de logs por minuto.
+
+O endereço externo aparece em:
+
+```bash
+kubectl get svc grafana -n observability
+```
+
+Usuário padrão: `admin`. A senha vem do Secret `GRAFANA_ADMIN_PASSWORD`.

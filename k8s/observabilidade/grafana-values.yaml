@@ -1,0 +1,33 @@
+replicas: 1
+
+service:
+  type: LoadBalancer
+  port: 80
+  loadBalancerSourceRanges:
+    - "0.0.0.0/0"
+
+persistence:
+  enabled: false
+
+admin:
+  existingSecret: grafana-admin
+  userKey: admin-user
+  passwordKey: admin-password
+
+sidecar:
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    searchNamespace: observability
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        uid: loki
+        type: loki
+        access: proxy
+        url: http://loki-gateway.observability.svc.cluster.local
+        isDefault: true
+        editable: false

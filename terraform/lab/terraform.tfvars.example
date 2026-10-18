@@ -1,0 +1,5 @@
+aws_region          = "us-east-1"
+project_name        = "oficina360"
+kubernetes_version  = "1.36"
+node_instance_types = ["t3.large"]
+allowed_cidr        = "0.0.0.0/0"

@@ -12,13 +12,11 @@ target/
 .settings
 .springBeans
 .sts4-cache
-
 ### IntelliJ IDEA ###
 .idea
 *.iws
 *.iml
 *.ipr
-
 ### NetBeans ###
 /nbproject/private/
 /nbbuild/
@@ -28,6 +26,26 @@ target/
 build/
 !**/src/main/**/build/
 !**/src/test/**/build/
-
 ### VS Code ###
 .vscode/
+
+
+**/.terraform/
+secret.yaml
+**/secret.yaml
+**/*-secret.yaml
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.bak-*
+*.diff
+*.tfvars
+!*.tfvars.example
+*.bak
+validacao-*.txt
+*-validation.txt
+*-diagnostics.txt
+github-actions-sha-update.txt
+*.bak-*
+diff.txt
+tree.txt

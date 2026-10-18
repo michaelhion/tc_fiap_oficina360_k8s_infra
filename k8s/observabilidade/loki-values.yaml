@@ -1,0 +1,53 @@
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  storage:
+    type: filesystem
+    bucketNames:
+      chunks: chunks
+      ruler: ruler
+      admin: admin
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: false
+
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+lokiCanary:
+  enabled: false
+
+gateway:
+  enabled: true
+  # O chart define anti-affinity obrigatoria por padrao. Em cluster de um unico
+  # node, o pod novo de um rollout fica Pending ao lado do antigo. O Helm faz
+  # merge de mapas, entao "{}" nao remove o padrao: so "null" remove.
+  affinity: null
+  # Recria o pod em vez de subir o novo antes de derrubar o antigo.
+  deploymentStrategy:
+    type: Recreate
+
+minio:
+  enabled: false
