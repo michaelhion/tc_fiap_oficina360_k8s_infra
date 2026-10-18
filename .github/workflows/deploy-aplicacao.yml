@@ -52,6 +52,26 @@ jobs:
             exit 1
           fi
 
+      - name: Instalar kubeconform
+        if: inputs.action == 'validate'
+        env:
+          KUBECONFORM_VERSION: "0.7.0"
+        run: |
+          set -euo pipefail
+
+          curl -fsSLo /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+
+          tar -xzf /tmp/kubeconform.tar.gz \
+            -C /tmp kubeconform
+
+          sudo install \
+            -m 0755 \
+            /tmp/kubeconform \
+            /usr/local/bin/kubeconform
+
+          kubeconform -v
+
       - name: Validar manifests
         if: inputs.action == 'validate'
         env:
@@ -59,12 +79,19 @@ jobs:
         run: |
           set -euo pipefail
 
-          kubectl apply --dry-run=client --validate=false \
-            -f k8s/aws/namespace.yaml \
-            -f k8s/aws/api-service.yaml
+          export IMAGE
 
-          envsubst '${IMAGE}' < k8s/aws/api-deployment.yaml \
-            | kubectl apply --dry-run=client --validate=false -f -
+          envsubst '${IMAGE}' \
+            < k8s/aws/api-deployment.yaml \
+            > /tmp/api-deployment.yaml
+
+          kubeconform \
+            -strict \
+            -summary \
+            -kubernetes-version 1.36.0 \
+            k8s/aws/namespace.yaml \
+            k8s/aws/api-service.yaml \
+            /tmp/api-deployment.yaml
 
       - name: Configurar credenciais AWS
         if: inputs.action == 'deploy' || inputs.action == 'destroy'
