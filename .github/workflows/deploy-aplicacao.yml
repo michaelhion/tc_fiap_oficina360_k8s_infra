@@ -102,12 +102,11 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Configurar cluster
+      - name: Configurar cluster sem DescribeCluster
         if: inputs.action == 'deploy' || inputs.action == 'destroy'
+        working-directory: .
         run: |
-          aws eks update-kubeconfig \
-            --region "$AWS_REGION" \
-            --name "$CLUSTER_NAME"
+          bash scripts/configure-eks-kubeconfig.sh
 
       - name: Deploy
         if: inputs.action == 'deploy'
