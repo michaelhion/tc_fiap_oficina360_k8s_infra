@@ -71,39 +71,6 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Diagnosticar permissoes do Learner Lab
-        working-directory: .
-        run: |
-          {
-            echo "===== IDENTIDADE ====="
-            aws sts get-caller-identity
-
-            echo
-            echo "===== ROLE ESPERADA ====="
-            ACCOUNT_ID="$(
-              aws sts get-caller-identity \
-                --query Account \
-                --output text
-            )"
-
-            echo "arn:aws:iam::${ACCOUNT_ID}:role/voclabs"
-
-            echo
-            echo "===== IAM GET ROLE ====="
-            aws iam get-role \
-              --role-name voclabs || true
-
-            echo
-            echo "===== EKS EXISTENTES ====="
-            aws eks list-clusters \
-              --region "$AWS_REGION" || true
-
-            echo
-            echo "===== EC2 INSTANCE PROFILES ====="
-            aws iam list-instance-profiles \
-              --max-items 20 || true
-          } > learner-lab-permissions.txt 2>&1
-
       - name: Publicar diagnostico
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -166,6 +133,43 @@ jobs:
       - name: Terraform validate before deploy
         if: inputs.action == 'deploy'
         run: terraform validate
+
+      - name: Descobrir roles EKS do Learner Lab
+        if: inputs.action == 'deploy'
+        working-directory: .
+        run: |
+          set -euo pipefail
+
+          CLUSTER_ROLE_ARN="$(
+            aws iam list-roles \
+              --query "Roles[?contains(RoleName, 'LabEksClusterRole')].Arn | [0]" \
+              --output text
+          )"
+
+          NODE_ROLE_ARN="$(
+            aws iam list-roles \
+              --query "Roles[?contains(RoleName, 'LabEksNodeRole')].Arn | [0]" \
+              --output text
+          )"
+
+          if [[ -z "$CLUSTER_ROLE_ARN" || "$CLUSTER_ROLE_ARN" == "None" ]]; then
+            echo "::error::Role LabEksClusterRole não encontrada."
+            exit 1
+          fi
+
+          if [[ -z "$NODE_ROLE_ARN" || "$NODE_ROLE_ARN" == "None" ]]; then
+            echo "::error::Role LabEksNodeRole não encontrada."
+            exit 1
+          fi
+
+          echo "TF_VAR_eks_cluster_role_arn=$CLUSTER_ROLE_ARN" \
+            >> "$GITHUB_ENV"
+
+          echo "TF_VAR_eks_node_role_arn=$NODE_ROLE_ARN" \
+            >> "$GITHUB_ENV"
+
+          echo "Cluster role localizada."
+          echo "Node role localizada."
 
       - name: Terraform plan
         if: inputs.action == 'deploy'
