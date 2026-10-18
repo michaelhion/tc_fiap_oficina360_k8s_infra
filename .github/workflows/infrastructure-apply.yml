@@ -71,6 +71,46 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Diagnosticar permissoes do Learner Lab
+        working-directory: .
+        run: |
+          {
+            echo "===== IDENTIDADE ====="
+            aws sts get-caller-identity
+
+            echo
+            echo "===== ROLE ESPERADA ====="
+            ACCOUNT_ID="$(
+              aws sts get-caller-identity \
+                --query Account \
+                --output text
+            )"
+
+            echo "arn:aws:iam::${ACCOUNT_ID}:role/voclabs"
+
+            echo
+            echo "===== IAM GET ROLE ====="
+            aws iam get-role \
+              --role-name voclabs || true
+
+            echo
+            echo "===== EKS EXISTENTES ====="
+            aws eks list-clusters \
+              --region "$AWS_REGION" || true
+
+            echo
+            echo "===== EC2 INSTANCE PROFILES ====="
+            aws iam list-instance-profiles \
+              --max-items 20 || true
+          } > learner-lab-permissions.txt 2>&1
+
+      - name: Publicar diagnostico
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: learner-lab-permissions
+          path: learner-lab-permissions.txt
+          retention-days: 1
+
       - name: Prepare Terraform state backend
         if: inputs.action == 'deploy'
         run: |
