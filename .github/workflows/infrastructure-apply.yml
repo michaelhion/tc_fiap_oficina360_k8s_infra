@@ -3,10 +3,19 @@ name: Infrastructure Apply
 on:
   workflow_dispatch:
     inputs:
+      action:
+        description: Acao da infraestrutura
+        required: true
+        type: choice
+        options:
+          - validate
+          - deploy
+
       kubernetes_version:
         description: Versao do Kubernetes aceita pelo lab
         required: true
         default: "1.36"
+        type: string
 
 permissions:
   contents: read
@@ -18,87 +27,133 @@ concurrency:
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
   TF_VAR_aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
   TF_VAR_project_name: oficina360
   TF_VAR_kubernetes_version: ${{ inputs.kubernetes_version }}
 
 jobs:
-  apply:
+  infrastructure:
+    name: Infrastructure ${{ inputs.action }}
     runs-on: ubuntu-latest
+
     defaults:
       run:
         shell: bash
         working-directory: terraform/lab
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
-        with:
-          terraform_version: "1.14.0"
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+
+      - name: Terraform format
+        run: terraform fmt -check -recursive
+
+      # Validação local, sem acessar o backend S3.
+      - name: Terraform init for validation
+        if: inputs.action == 'validate'
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        if: inputs.action == 'validate'
+        run: terraform validate
+
+      # A partir daqui somente deploy precisa de AWS.
+      - name: Configure AWS credentials
+        if: inputs.action == 'deploy'
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Validar identidade e preparar backend
+      - name: Prepare Terraform state backend
+        if: inputs.action == 'deploy'
         run: |
           set -euo pipefail
-          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+
+          ACCOUNT_ID="$(
+            aws sts get-caller-identity \
+              --query Account \
+              --output text
+          )"
+
           BUCKET="oficina360-tfstate-${ACCOUNT_ID}-${AWS_REGION}"
+
           echo "TF_STATE_BUCKET=$BUCKET" >> "$GITHUB_ENV"
 
-          if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+          if ! aws s3api head-bucket \
+            --bucket "$BUCKET" 2>/dev/null; then
+
             if [[ "$AWS_REGION" == "us-east-1" ]]; then
-              aws s3api create-bucket --bucket "$BUCKET"
+              aws s3api create-bucket \
+                --bucket "$BUCKET"
             else
               aws s3api create-bucket \
                 --bucket "$BUCKET" \
-                --create-bucket-configuration "LocationConstraint=$AWS_REGION"
+                --create-bucket-configuration \
+                  "LocationConstraint=$AWS_REGION"
             fi
           fi
-          aws s3api put-public-access-block \
-          --bucket "$BUCKET" \
-          --public-access-block-configuration \
-          BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
-          
-          aws s3api put-bucket-versioning \
-          --bucket "$BUCKET" \
-          --versioning-configuration Status=Enabled
-          
-          aws s3api put-bucket-encryption \
-          --bucket "$BUCKET" \
-          --server-side-encryption-configuration \
-          '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
 
-      - name: Terraform fmt e init
+          aws s3api put-public-access-block \
+            --bucket "$BUCKET" \
+            --public-access-block-configuration \
+              BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+          aws s3api put-bucket-versioning \
+            --bucket "$BUCKET" \
+            --versioning-configuration Status=Enabled
+
+          aws s3api put-bucket-encryption \
+            --bucket "$BUCKET" \
+            --server-side-encryption-configuration \
+              '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+
+      - name: Terraform init with remote backend
+        if: inputs.action == 'deploy'
         run: |
-          terraform fmt -check -recursive
           terraform init \
             -backend-config="bucket=$TF_STATE_BUCKET" \
             -backend-config="key=oficina360/lab.tfstate" \
             -backend-config="region=$AWS_REGION" \
             -backend-config="use_lockfile=true"
 
-      - name: Terraform validate
+      - name: Terraform validate before deploy
+        if: inputs.action == 'deploy'
         run: terraform validate
 
       - name: Terraform plan
+        if: inputs.action == 'deploy'
         run: terraform plan -out=tfplan
 
       - name: Terraform apply
+        if: inputs.action == 'deploy'
         run: terraform apply -auto-approve tfplan
 
-      - name: Configurar kubectl e validar cluster
+      - name: Configure kubectl
+        if: inputs.action == 'deploy'
         run: |
-          CLUSTER_NAME="$(terraform output -raw cluster_name)"
-          aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
-          kubectl get nodes -o wide
-          kubectl create namespace oficina360 --dry-run=client -o yaml | kubectl apply -f -
-          kubectl create namespace kong --dry-run=client -o yaml | kubectl apply -f -
-          kubectl create namespace observability --dry-run=client -o yaml | kubectl apply -f -
+          CLUSTER_NAME="$(
+            terraform output -raw cluster_name
+          )"
 
-      - name: Resumo
-        run: terraform output
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$CLUSTER_NAME"
+
+          kubectl get nodes -o wide
+
+      - name: Validate network parameters
+        if: inputs.action == 'deploy'
+        working-directory: .
+        run: |
+          aws ssm get-parameters-by-path \
+            --path "/oficina360/network" \
+            --recursive \
+            --query 'Parameters[].{Name:Name,Value:Value}' \
+            --output table
