@@ -13,7 +13,7 @@ resource "aws_eks_cluster" "main" {
 
     endpoint_public_access  = true
     endpoint_private_access = true
-    public_access_cidrs      = [var.allowed_cidr]
+    public_access_cidrs     = [var.allowed_cidr]
   }
 }
 
