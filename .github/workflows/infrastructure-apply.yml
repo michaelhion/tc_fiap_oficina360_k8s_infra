@@ -59,6 +59,9 @@ jobs:
 
       - name: Terraform validate
         if: inputs.action == 'validate'
+        env:
+          TF_VAR_eks_cluster_role_arn: arn:aws:iam::000000000000:role/validation-LabEksClusterRole-x
+          TF_VAR_eks_node_role_arn: arn:aws:iam::000000000000:role/validation-LabEksNodeRole-x
         run: terraform validate
 
       # A partir daqui somente deploy precisa de AWS.

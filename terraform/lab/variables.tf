@@ -23,3 +23,31 @@ variable "allowed_cidr" {
   type        = string
   default     = "0.0.0.0/0"
 }
+
+variable "eks_cluster_role_arn" {
+  description = "ARN da role preexistente do Learner Lab para o cluster EKS"
+  type        = string
+
+  validation {
+    condition = can(regex(
+      "^arn:aws:iam::[0-9]{12}:role/.+LabEksClusterRole.+$",
+      var.eks_cluster_role_arn
+    ))
+
+    error_message = "Informe o ARN da role LabEksClusterRole."
+  }
+}
+
+variable "eks_node_role_arn" {
+  description = "ARN da role preexistente do Learner Lab para o node group EKS"
+  type        = string
+
+  validation {
+    condition = can(regex(
+      "^arn:aws:iam::[0-9]{12}:role/.+LabEksNodeRole.+$",
+      var.eks_node_role_arn
+    ))
+
+    error_message = "Informe o ARN da role LabEksNodeRole."
+  }
+}
