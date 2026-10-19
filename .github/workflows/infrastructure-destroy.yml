@@ -66,13 +66,19 @@ jobs:
 
           echo "Roles EKS configuradas pelas Repository Variables."
 
-      - name: Localizar backend
+      - name: Configurar backend
+        timeout-minutes: 2
+        working-directory: .
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
         run: |
           set -euo pipefail
-          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-          BUCKET="oficina360-tfstate-${ACCOUNT_ID}-${AWS_REGION}"
-          echo "TF_STATE_BUCKET=$BUCKET" >> "$GITHUB_ENV"
-          aws s3api head-bucket --bucket "$BUCKET"
+
+          : "${TF_STATE_BUCKET:?Repository Variable TF_STATE_BUCKET nao definida}"
+
+          echo "TF_STATE_BUCKET=$TF_STATE_BUCKET" >> "$GITHUB_ENV"
+          echo "Backend configurado: $TF_STATE_BUCKET"
+          echo "State key: oficina360/lab.tfstate"
 
       - name: Terraform init
         run: |
@@ -82,6 +88,33 @@ jobs:
             -backend-config="region=$AWS_REGION" \
             -backend-config="use_lockfile=true"
 
+      - name: Verificar state antes do destroy
+  timeout-minutes: 2
+  run: |
+    set -euo pipefail
+
+    terraform state list \
+      > /tmp/terraform-state-resources.txt
+
+    cat /tmp/terraform-state-resources.txt
+
+    if ! grep -q '^aws_eks_cluster\.main$' \
+      /tmp/terraform-state-resources.txt; then
+
+      echo "::error::O state nao contem aws_eks_cluster.main."
+      echo "::error::Destroy interrompido para evitar operar com state incorreto."
+      exit 1
+    fi
+
+    if ! grep -q '^module\.vpc\.' \
+      /tmp/terraform-state-resources.txt; then
+
+      echo "::error::O state nao contem os recursos da VPC."
+      exit 1
+    fi
+
+    echo "State remoto validado."
+      
       - name: Configurar cluster sem DescribeCluster
         working-directory: .
         env:
