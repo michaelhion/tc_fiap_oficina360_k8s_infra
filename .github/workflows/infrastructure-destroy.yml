@@ -12,33 +12,57 @@ concurrency:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+
   TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
   TF_VAR_aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
   TF_VAR_project_name: oficina360
+  TF_VAR_kubernetes_version: "1.36"
 
 jobs:
   destroy:
+    name: Infrastructure Destroy
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+
     defaults:
       run:
         shell: bash
         working-directory: terraform/lab
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: "1.14.0"
           terraform_wrapper: false
 
-      - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+      - name: Configurar Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+
+      - name: Configurar credenciais AWS
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Validar identidade AWS
+        timeout-minutes: 1
+        working-directory: .
+        run: |
+          set -euo pipefail
+
+          aws sts get-caller-identity
+
       - name: Configurar roles EKS
+        timeout-minutes: 1
+        working-directory: .
         env:
           EKS_CLUSTER_ROLE_ARN: ${{ vars.EKS_CLUSTER_ROLE_ARN }}
           EKS_NODE_ROLE_ARN: ${{ vars.EKS_NODE_ROLE_ARN }}
@@ -48,12 +72,12 @@ jobs:
           : "${EKS_CLUSTER_ROLE_ARN:?Repository Variable EKS_CLUSTER_ROLE_ARN nao definida}"
           : "${EKS_NODE_ROLE_ARN:?Repository Variable EKS_NODE_ROLE_ARN nao definida}"
 
-          if [[ ! "$EKS_CLUSTER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksClusterRole.+$ ]]; then
+          if [[ ! "$EKS_CLUSTER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksClusterRole.*$ ]]; then
             echo "::error::EKS_CLUSTER_ROLE_ARN possui formato invalido."
             exit 1
           fi
 
-          if [[ ! "$EKS_NODE_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksNodeRole.+$ ]]; then
+          if [[ ! "$EKS_NODE_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksNodeRole.*$ ]]; then
             echo "::error::EKS_NODE_ROLE_ARN possui formato invalido."
             exit 1
           fi
@@ -67,7 +91,7 @@ jobs:
           echo "Roles EKS configuradas pelas Repository Variables."
 
       - name: Configurar backend
-        timeout-minutes: 2
+        timeout-minutes: 1
         working-directory: .
         env:
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
@@ -76,70 +100,126 @@ jobs:
 
           : "${TF_STATE_BUCKET:?Repository Variable TF_STATE_BUCKET nao definida}"
 
-          echo "TF_STATE_BUCKET=$TF_STATE_BUCKET" >> "$GITHUB_ENV"
+          echo "TF_STATE_BUCKET=$TF_STATE_BUCKET" \
+            >> "$GITHUB_ENV"
+
           echo "Backend configurado: $TF_STATE_BUCKET"
           echo "State key: oficina360/lab.tfstate"
 
       - name: Terraform init
+        timeout-minutes: 5
+        env:
+          AWS_MAX_ATTEMPTS: "2"
+          AWS_RETRY_MODE: standard
+          AWS_PAGER: ""
         run: |
-          terraform init \
+          set -euo pipefail
+
+          terraform init -reconfigure \
             -backend-config="bucket=$TF_STATE_BUCKET" \
             -backend-config="key=oficina360/lab.tfstate" \
             -backend-config="region=$AWS_REGION" \
             -backend-config="use_lockfile=true"
 
       - name: Verificar state antes do destroy
-  timeout-minutes: 2
-  run: |
-    set -euo pipefail
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
 
-    terraform state list \
-      > /tmp/terraform-state-resources.txt
+          terraform state list \
+            > /tmp/terraform-state-resources.txt
 
-    cat /tmp/terraform-state-resources.txt
+          echo "===== RECURSOS NO STATE ====="
+          cat /tmp/terraform-state-resources.txt
 
-    if ! grep -q '^aws_eks_cluster\.main$' \
-      /tmp/terraform-state-resources.txt; then
+          if [[ ! -s /tmp/terraform-state-resources.txt ]]; then
+            echo "::error::O state Terraform esta vazio."
+            echo "::error::Destroy interrompido para evitar operar com state incorreto."
+            exit 1
+          fi
 
-      echo "::error::O state nao contem aws_eks_cluster.main."
-      echo "::error::Destroy interrompido para evitar operar com state incorreto."
-      exit 1
-    fi
+          if ! grep -q '^aws_eks_cluster\.main$' \
+            /tmp/terraform-state-resources.txt; then
 
-    if ! grep -q '^module\.vpc\.' \
-      /tmp/terraform-state-resources.txt; then
+            echo "::error::O state nao contem aws_eks_cluster.main."
+            echo "::error::Destroy interrompido para evitar usar o backend errado."
+            exit 1
+          fi
 
-      echo "::error::O state nao contem os recursos da VPC."
-      exit 1
-    fi
+          if ! grep -q '^aws_eks_node_group\.main$' \
+            /tmp/terraform-state-resources.txt; then
 
-    echo "State remoto validado."
-      
+            echo "::error::O state nao contem aws_eks_node_group.main."
+            exit 1
+          fi
+
+          if ! grep -q '^module\.vpc\.' \
+            /tmp/terraform-state-resources.txt; then
+
+            echo "::error::O state nao contem recursos do modulo VPC."
+            exit 1
+          fi
+
+          echo "State remoto validado."
+
+      - name: Terraform validate
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+
+          terraform validate
+
       - name: Configurar cluster sem DescribeCluster
+        timeout-minutes: 3
         working-directory: .
         env:
           EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
           EKS_CLUSTER_ENDPOINT: ${{ vars.EKS_CLUSTER_ENDPOINT }}
           EKS_CLUSTER_CA: ${{ vars.EKS_CLUSTER_CA }}
         run: |
+          set -euo pipefail
+
+          : "${EKS_CLUSTER_NAME:?Repository Variable EKS_CLUSTER_NAME nao definida}"
+          : "${EKS_CLUSTER_ENDPOINT:?Repository Variable EKS_CLUSTER_ENDPOINT nao definida}"
+          : "${EKS_CLUSTER_CA:?Repository Variable EKS_CLUSTER_CA nao definida}"
+
           bash scripts/configure-eks-kubeconfig.sh
 
-      - name: Remover recursos Kubernetes externos ao Terraform
+      - name: Remover releases Helm
+        timeout-minutes: 10
         working-directory: .
         run: |
-          set +e
+          set -u
 
-          helm uninstall alloy \
-            --namespace observability
+          uninstall_release() {
+            local release="$1"
+            local namespace="$2"
 
-          helm uninstall grafana \
-            --namespace observability
+            if helm status "$release" \
+              --namespace "$namespace" \
+              >/dev/null 2>&1; then
 
-          helm uninstall loki \
-            --namespace observability
+              echo "Removendo release $release do namespace $namespace..."
 
-          helm uninstall kong \
-            --namespace kong
+              helm uninstall "$release" \
+                --namespace "$namespace" \
+                --wait \
+                --timeout 5m
+            else
+              echo "Release $release nao existe em $namespace."
+            fi
+          }
+
+          uninstall_release alloy observability
+          uninstall_release grafana observability
+          uninstall_release loki observability
+          uninstall_release kong kong
+
+      - name: Remover namespaces Kubernetes
+        timeout-minutes: 10
+        working-directory: .
+        run: |
+          set -euo pipefail
 
           kubectl delete namespace observability \
             --ignore-not-found=true \
@@ -151,33 +231,21 @@ jobs:
             --wait=true \
             --timeout=5m
 
-          exit 0
+          echo "Namespaces externos ao Terraform removidos."
 
       - name: Aguardar remocao dos Load Balancers da VPC
+        timeout-minutes: 10
+        env:
+          AWS_MAX_ATTEMPTS: "2"
+          AWS_RETRY_MODE: standard
+          AWS_PAGER: ""
         run: |
           set -euo pipefail
-          VPC_ID="$(terraform output -raw vpc_id 2>/dev/null || true)"
-          if [[ -z "$VPC_ID" ]]; then
-            echo "VPC nao encontrada no state; nada a aguardar."
-            exit 0
-          fi
-          for attempt in $(seq 1 30); do
-            CLASSIC="$(aws elb describe-load-balancers \
-              --query "length(LoadBalancerDescriptions[?VPCId=='${VPC_ID}'])" \
-              --output text)"
-            V2="$(aws elbv2 describe-load-balancers \
-              --query "length(LoadBalancers[?VpcId=='${VPC_ID}'])" \
-              --output text)"
-            if [[ "$CLASSIC" == "0" && "$V2" == "0" ]]; then
-              echo "Load Balancers removidos. Aguardando a liberacao das interfaces de rede."
-              sleep 30
-              exit 0
-            fi
-            echo "Aguardando Load Balancers (classic=$CLASSIC, v2=$V2) - tentativa $attempt/30"
-            sleep 10
-          done
-          echo "::error::Ainda existem Load Balancers na VPC $VPC_ID. Remova-os e execute o workflow novamente."
-          exit 1
 
-      - name: Terraform destroy
-        run: terraform destroy -auto-approve
+          VPC_ID="$(
+            terraform output -raw vpc_id 2>/dev/null ||
+            true
+          )"
+
+          if [[ -z "$VPC_ID" ]]; then
+            echo "::error::
