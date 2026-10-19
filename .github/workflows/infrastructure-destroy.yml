@@ -38,38 +38,33 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Descobrir roles EKS do Learner Lab
-        working-directory: .
+      - name: Configurar roles EKS
+        env:
+          EKS_CLUSTER_ROLE_ARN: ${{ vars.EKS_CLUSTER_ROLE_ARN }}
+          EKS_NODE_ROLE_ARN: ${{ vars.EKS_NODE_ROLE_ARN }}
         run: |
           set -euo pipefail
 
-          CLUSTER_ROLE_ARN="$(
-            aws iam list-roles \
-              --query "Roles[?contains(RoleName, 'LabEksClusterRole')].Arn | [0]" \
-              --output text
-          )"
+          : "${EKS_CLUSTER_ROLE_ARN:?Repository Variable EKS_CLUSTER_ROLE_ARN nao definida}"
+          : "${EKS_NODE_ROLE_ARN:?Repository Variable EKS_NODE_ROLE_ARN nao definida}"
 
-          NODE_ROLE_ARN="$(
-            aws iam list-roles \
-              --query "Roles[?contains(RoleName, 'LabEksNodeRole')].Arn | [0]" \
-              --output text
-          )"
-
-          if [[ -z "$CLUSTER_ROLE_ARN" || "$CLUSTER_ROLE_ARN" == "None" ]]; then
-            echo "::error::Role LabEksClusterRole nao encontrada."
+          if [[ ! "$EKS_CLUSTER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksClusterRole.+$ ]]; then
+            echo "::error::EKS_CLUSTER_ROLE_ARN possui formato invalido."
             exit 1
           fi
 
-          if [[ -z "$NODE_ROLE_ARN" || "$NODE_ROLE_ARN" == "None" ]]; then
-            echo "::error::Role LabEksNodeRole nao encontrada."
+          if [[ ! "$EKS_NODE_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksNodeRole.+$ ]]; then
+            echo "::error::EKS_NODE_ROLE_ARN possui formato invalido."
             exit 1
           fi
 
-          echo "TF_VAR_eks_cluster_role_arn=$CLUSTER_ROLE_ARN" \
+          echo "TF_VAR_eks_cluster_role_arn=$EKS_CLUSTER_ROLE_ARN" \
             >> "$GITHUB_ENV"
 
-          echo "TF_VAR_eks_node_role_arn=$NODE_ROLE_ARN" \
+          echo "TF_VAR_eks_node_role_arn=$EKS_NODE_ROLE_ARN" \
             >> "$GITHUB_ENV"
+
+          echo "Roles EKS configuradas pelas Repository Variables."
 
       - name: Localizar backend
         run: |
