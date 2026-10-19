@@ -1,0 +1,207 @@
+
+============================================================
+1. CONTEXTO LOCAL E GIT
+============================================================
+Data: dom 18 out 2026 21:23:17 -03
+Diretorio: /mnt/c/Users/trabalho/Desktop/tech_challengers/tc_fiap_oficina360_k8s_infra
+[OK] Repositorio Git detectado
+Branch local: release/fase-3
+Commit local: 0e5769362006df240aab8766f890835ac76a6322
+?? aplicacao-deploy-diagnostico.txt
+?? diagnosticar-deploy-aplicacao.sh
+?? diagnosticar-falha-aplicacao-profundo.sh
+?? diagnostico-profundo-aplicacao.txt
+
+============================================================
+2. IDENTIDADE AWS
+============================================================
+{
+    "UserId": "AROAU5L7L72K5B2KZM3VI:user5231828=michael.hion@outlook.com",
+    "Account": "337958928021",
+    "Arn": "arn:aws:sts::337958928021:assumed-role/voclabs/user5231828=michael.hion@outlook.com"
+}
+[OK] Credenciais AWS validas
+
+============================================================
+3. TESTE DIRETO DE PERMISSOES SSM
+============================================================
+[OK] Leitura SSM permitida: /oficina360/database/host
+Valor: oficina360-lab-postgres.cmiwy5g3bvax.us-east-1.rds.amazonaws.com
+[OK] Leitura SSM permitida: /oficina360/database/port
+Valor: 5432
+[OK] Leitura SSM permitida: /oficina360/database/name
+Valor: oficina360
+
+============================================================
+4. ESTADO REAL DO RDS
+============================================================
+[OK] RDS localizado
+{
+    "Status": "available",
+    "Host": "oficina360-lab-postgres.cmiwy5g3bvax.us-east-1.rds.amazonaws.com",
+    "Port": 5432,
+    "Name": "oficina360",
+    "Public": false,
+    "Encrypted": true,
+    "SecurityGroups": [
+        "sg-090aa916810839880"
+    ]
+}
+
+============================================================
+5. WORKFLOW LOCAL
+============================================================
+[OK] Workflow presente: .github/workflows/deploy-aplicacao.yml
+40:        if: inputs.action == 'deploy'
+56:        if: inputs.action == 'validate'
+76:        if: inputs.action == 'validate'
+97:        if: inputs.action == 'deploy' || inputs.action == 'destroy'
+105:      - name: Configurar cluster sem DescribeCluster
+106:        if: inputs.action == 'deploy' || inputs.action == 'destroy'
+113:          bash scripts/configure-eks-kubeconfig.sh
+115:      - name: Deploy
+116:        if: inputs.action == 'deploy'
+119:          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+120:          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+125:          DB_HOST="$(aws ssm get-parameter \
+126:            --name '/oficina360/database/host' \
+130:          DB_PORT="$(aws ssm get-parameter \
+131:            --name '/oficina360/database/port' \
+135:          DB_NAME="$(aws ssm get-parameter \
+136:            --name '/oficina360/database/name' \
+145:            --from-literal=DB_HOST="$DB_HOST" \
+146:            --from-literal=DB_PORT="$DB_PORT" \
+147:            --from-literal=DB_NAME="$DB_NAME" \
+154:            --from-literal=DB_USERNAME="$DB_USERNAME" \
+155:            --from-literal=DB_PASSWORD="$DB_PASSWORD" \
+171:      - name: Destroy
+172:        if: inputs.action == 'destroy'
+178:        if: always() && inputs.action != 'validate'
+190:        if: always() && inputs.action != 'validate'
+[WARN] Workflow ainda depende de ssm:GetParameter para dados do banco
+[WARN] Workflow ainda nao usa vars.DB_HOST, vars.DB_PORT e vars.DB_NAME
+
+============================================================
+6. ULTIMA EXECUCAO DO GITHUB ACTIONS
+============================================================
+[{"conclusion":"failure","databaseId":39180374787,"event":"workflow_dispatch","headBranch":"release/fase-3","headSha":"0e5769362006df240aab8766f890835ac76a6322","status":"completed","url":"https://github.com/michaelhion/tc_fiap_oficina360_k8s_infra/actions/runs/39180374787"}]
+Run ID: 39180374787
+Branch do run: release/fase-3
+SHA do run: 0e5769362006df240aab8766f890835ac76a6322
+[OK] Run usou a branch local
+[OK] Run usou o commit local
+application	Deploy	﻿2026-10-19T00:21:07.5177361Z ##[group]Run set -euo pipefail
+application	Deploy	2026-10-19T00:21:07.5177611Z [36;1mset -euo pipefail[0m
+application	Deploy	2026-10-19T00:21:07.5177755Z [36;1m[0m
+application	Deploy	2026-10-19T00:21:07.5177893Z [36;1mDB_HOST="$(aws ssm get-parameter \[0m
+application	Deploy	2026-10-19T00:21:07.5178088Z [36;1m  --name '/oficina360/database/host' \[0m
+application	Deploy	2026-10-19T00:21:07.5178269Z [36;1m  --query 'Parameter.Value' \[0m
+application	Deploy	2026-10-19T00:21:07.5178430Z [36;1m  --output text)"[0m
+application	Deploy	2026-10-19T00:21:07.5178577Z [36;1m[0m
+application	Deploy	2026-10-19T00:21:07.5178707Z [36;1mDB_PORT="$(aws ssm get-parameter \[0m
+application	Deploy	2026-10-19T00:21:07.5178886Z [36;1m  --name '/oficina360/database/port' \[0m
+application	Deploy	2026-10-19T00:21:07.5179069Z [36;1m  --query 'Parameter.Value' \[0m
+application	Deploy	2026-10-19T00:21:07.5179227Z [36;1m  --output text)"[0m
+application	Deploy	2026-10-19T00:21:07.5179367Z [36;1m[0m
+application	Deploy	2026-10-19T00:21:07.5179530Z [36;1mDB_NAME="$(aws ssm get-parameter \[0m
+application	Deploy	2026-10-19T00:21:07.5179718Z [36;1m  --name '/oficina360/database/name' \[0m
+application	Deploy	2026-10-19T00:21:07.5179892Z [36;1m  --query 'Parameter.Value' \[0m
+application	Deploy	2026-10-19T00:21:07.5180072Z [36;1m  --output text)"[0m
+application	Deploy	2026-10-19T00:21:07.5180203Z [36;1m[0m
+application	Deploy	2026-10-19T00:21:07.5180344Z [36;1mkubectl apply -f k8s/aws/namespace.yaml[0m
+application	Deploy	2026-10-19T00:21:07.5180510Z [36;1m[0m
+application	Deploy	2026-10-19T00:21:07.5180656Z [36;1mkubectl create configmap oficina360-config \[0m
+application	Deploy	2026-10-19T00:21:07.5180851Z [36;1m  --namespace "$NAMESPACE" \[0m
+application	Deploy	2026-10-19T00:21:07.5181046Z [36;1m  --from-literal=SPRING_PROFILES_ACTIVE=aws \[0m
+application	Deploy	2026-10-19T00:21:07.5181242Z [36;1m  --from-literal=DB_HOST="$DB_HOST" \[0m
+application	Deploy	2026-10-19T00:21:07.5181435Z [36;1m  --from-literal=DB_PORT="$DB_PORT" \[0m
+application	Deploy	2026-10-19T00:21:07.5181611Z [36;1m  --from-literal=DB_NAME="$DB_NAME" \[0m
+application	Deploy	2026-10-19T00:21:07.5181787Z [36;1m  --from-literal=SERVER_PORT=8081 \[0m
+application	Deploy	2026-10-19T00:21:07.5181990Z [36;1m  --dry-run=client -o yaml \[0m
+application	Deploy	2026-10-19T00:21:07.5182201Z [36;1m  | kubectl apply -f -[0m
+application	Deploy	2026-10-19T00:21:07.5182361Z [36;1m[0m
+application	Deploy	2026-10-19T00:21:07.5182515Z [36;1mkubectl create secret generic oficina360-secret \[0m
+application	Deploy	2026-10-19T00:21:07.5182714Z [36;1m  --namespace "$NAMESPACE" \[0m
+application	Deploy	2026-10-19T00:21:07.5182894Z [36;1m  --from-literal=DB_USERNAME="$DB_USERNAME" \[0m
+application	Deploy	2026-10-19T00:21:07.5183095Z [36;1m  --from-literal=DB_PASSWORD="$DB_PASSWORD" \[0m
+application	Deploy	2026-10-19T00:21:07.5183292Z [36;1m  --from-literal=JWT_SECRET="$JWT_SECRET" \[0m
+application	Deploy	2026-10-19T00:21:07.5183471Z [36;1m  --dry-run=client -o yaml \[0m
+application	Deploy	2026-10-19T00:21:07.5183630Z [36;1m  | kubectl apply -f -[0m
+application	Deploy	2026-10-19T00:21:07.5183772Z [36;1m[0m
+application	Deploy	2026-10-19T00:21:07.5183893Z [36;1mexport IMAGE[0m
+application	Deploy	2026-10-19T00:21:07.5184069Z [36;1menvsubst '${IMAGE}' < k8s/aws/api-deployment.yaml \[0m
+application	Deploy	2026-10-19T00:21:07.5184266Z [36;1m  > /tmp/api-deployment.yaml[0m
+application	Deploy	2026-10-19T00:21:07.5184418Z [36;1m[0m
+application	Deploy	2026-10-19T00:21:07.5184561Z [36;1mkubectl apply -f /tmp/api-deployment.yaml[0m
+application	Deploy	2026-10-19T00:21:07.5184886Z [36;1mkubectl apply -f k8s/aws/api-service.yaml[0m
+application	Deploy	2026-10-19T00:21:07.5185054Z [36;1m[0m
+application	Deploy	2026-10-19T00:21:07.5185207Z [36;1mkubectl rollout status deployment/oficina360-api \[0m
+application	Deploy	2026-10-19T00:21:07.5185608Z [36;1m  --namespace "$NAMESPACE" \[0m
+application	Deploy	2026-10-19T00:21:07.5185842Z [36;1m  --timeout=5m[0m
+application	Deploy	2026-10-19T00:21:07.5237708Z shell: /usr/bin/bash -e {0}
+application	Deploy	2026-10-19T00:21:07.5237862Z env:
+application	Deploy	2026-10-19T00:21:07.5237986Z   AWS_REGION: us-east-1
+application	Deploy	2026-10-19T00:21:07.5238131Z   CLUSTER_NAME: oficina360
+application	Deploy	2026-10-19T00:21:07.5238271Z   NAMESPACE: oficina360
+application	Deploy	2026-10-19T00:21:07.5238412Z   AWS_DEFAULT_REGION: us-east-1
+application	Deploy	2026-10-19T00:21:07.5238764Z   AWS_ACCESS_KEY_ID: ***
+application	Deploy	2026-10-19T00:21:07.5238961Z   AWS_SECRET_ACCESS_KEY: ***
+application	Deploy	2026-10-19T00:21:07.5240797Z   AWS_SESSION_TOKEN: ***
+application	Deploy	2026-10-19T00:21:07.5241014Z   IMAGE: docker pull michaelhion/oficina360:70dc080a6f03abadf9abce77641f0e14845ecb66
+application	Deploy	2026-10-19T00:21:07.5241256Z   DB_USERNAME: ***
+application	Deploy	2026-10-19T00:21:07.5241385Z   DB_PASSWORD: ***
+application	Deploy	2026-10-19T00:21:07.5241557Z   JWT_SECRET: ***
+application	Deploy	2026-10-19T00:21:07.5241682Z ##[endgroup]
+application	Deploy	2026-10-19T00:21:08.1519154Z 
+application	Deploy	2026-10-19T00:21:08.1525720Z aws: [ERROR]: An error occurred (AccessDeniedException) when calling the GetParameter operation: User: arn:aws:sts::337958928021:assumed-role/voclabs/user5231828=michael.hion@outlook.com is not authorized to perform: ssm:GetParameter on resource: arn:aws:ssm:us-east-1:337958928021:parameter/oficina360/database/host with an explicit deny in an identity-based policy: arn:aws:iam::337958928021:policy/voc-cancel-cred
+application	Deploy	2026-10-19T00:21:08.2494584Z ##[error]Process completed with exit code 254.
+[ERRO] Ultimo run falhou por ssm:GetParameter
+
+============================================================
+7. REPOSITORY VARIABLES
+============================================================
+[OK] Variable EKS_CLUSTER_NAME presente
+[OK] Variable EKS_CLUSTER_ENDPOINT presente
+[OK] Variable EKS_CLUSTER_CA presente
+[WARN] Variable DB_HOST ausente
+[WARN] Variable DB_PORT ausente
+[WARN] Variable DB_NAME ausente
+
+============================================================
+8. ESTADO KUBERNETES
+============================================================
+NAME                         STATUS   ROLES    AGE    VERSION               INTERNAL-IP   EXTERNAL-IP     OS-IMAGE                        KERNEL-VERSION                            CONTAINER-RUNTIME
+ip-10-42-0-97.ec2.internal   Ready    <none>   103m   v1.36.4-eks-b9510e3   10.42.0.97    34.229.231.47   Amazon Linux 2023.12.20261012   6.18.54-121.166.amzn2023.x86_64 (amd64)   containerd://2.3.5+unknown
+[OK] Cluster Kubernetes acessivel
+Error from server (NotFound): namespaces "oficina360" not found
+[WARN] Namespace oficina360 ainda nao existe
+
+============================================================
+9. CORRECAO EFETIVA RECOMENDADA
+============================================================
+CAUSA RAIZ: a politica do Learner Lab possui explicit deny para ssm:GetParameter.
+CORRECAO: nao usar Parameter Store no workflow da aplicacao.
+Use Repository Variables para DB_HOST, DB_PORT e DB_NAME; mantenha usuario/senha em GitHub Secrets.
+
+Comandos para cadastrar as variables:
+gh variable set DB_HOST --body 'oficina360-lab-postgres.cmiwy5g3bvax.us-east-1.rds.amazonaws.com'
+gh variable set DB_PORT --body '5432'
+gh variable set DB_NAME --body 'oficina360'
+
+No step Deploy, substitua os tres aws ssm get-parameter por:
+env:
+  DB_HOST: ${{ vars.DB_HOST }}
+  DB_PORT: ${{ vars.DB_PORT }}
+  DB_NAME: ${{ vars.DB_NAME }}
+  DB_USERNAME: ${{ secrets.DB_USERNAME }}
+  DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+  JWT_SECRET: ${{ secrets.JWT_SECRET }}
+
+============================================================
+10. RESUMO
+============================================================
+Aprovados: 13
+Avisos: 6
+Erros: 1
+RESULTADO: FALHA EXPLICADA. MIGRAR CONFIGURACAO DO BANCO PARA GITHUB VARIABLES.
+Relatorio: diagnostico-profundo-aplicacao.txt

@@ -1,0 +1,101 @@
+
+============================================================
+1. CONTEXTO LOCAL
+============================================================
+Data: dom 18 out 2026 21:20:01 -03
+Diretorio: /mnt/c/Users/trabalho/Desktop/tech_challengers/tc_fiap_oficina360_k8s_infra
+[OK] Repositorio Git detectado
+Branch local: release/fase-3
+Commit local: 0e5769362006df240aab8766f890835ac76a6322
+?? aplicacao-deploy-diagnostico.txt
+?? diagnosticar-deploy-aplicacao.sh
+
+============================================================
+2. IDENTIDADE AWS E CLUSTER ATUAL
+============================================================
+{
+    "UserId": "AROAU5L7L72K5B2KZM3VI:user5231828=michael.hion@outlook.com",
+    "Account": "337958928021",
+    "Arn": "arn:aws:sts::337958928021:assumed-role/voclabs/user5231828=michael.hion@outlook.com"
+}
+[OK] Credenciais AWS validas
+Contexto kubectl: arn:aws:eks:us-east-1:337958928021:cluster/oficina360
+Endpoint kubectl: https://27584EDCC91ED64B7F0DFC07AE8C493E.gr7.us-east-1.eks.amazonaws.com
+Warning: resource 'namespaces' is not namespace scoped
+
+yes
+[OK] Identidade pode consultar namespaces
+NAME                         STATUS   ROLES    AGE   VERSION               INTERNAL-IP   EXTERNAL-IP     OS-IMAGE                        KERNEL-VERSION                            CONTAINER-RUNTIME
+ip-10-42-0-97.ec2.internal   Ready    <none>   99m   v1.36.4-eks-b9510e3   10.42.0.97    34.229.231.47   Amazon Linux 2023.12.20261012   6.18.54-121.166.amzn2023.x86_64 (amd64)   containerd://2.3.5+unknown
+[OK] Cluster Kubernetes acessivel
+
+============================================================
+3. ESTADO REAL DA APLICACAO
+============================================================
+Error from server (NotFound): namespaces "oficina360" not found
+[ERRO] Namespace oficina360 nao existe no cluster atual
+
+============================================================
+4. MANIFESTO E WORKFLOW LOCAL
+============================================================
+[OK] Manifesto k8s/aws/namespace.yaml existe
+[OK] Manifesto declara namespace oficina360
+[OK] Workflow .github/workflows/deploy-aplicacao.yml existe
+[OK] Step de deploy possui condicao action=deploy
+[OK] Workflow aplica o namespace
+[OK] Workflow usa script de kubeconfig sem DescribeCluster
+[OK] Workflow nao usa aws eks update-kubeconfig
+[INFO] Workflow contem exclusao de namespace; revise se esta somente no step Destroy
+--- Trechos relevantes do workflow ---
+40:        if: inputs.action == 'deploy'
+56:        if: inputs.action == 'validate'
+76:        if: inputs.action == 'validate'
+92:            k8s/aws/namespace.yaml \
+97:        if: inputs.action == 'deploy' || inputs.action == 'destroy'
+105:      - name: Configurar cluster sem DescribeCluster
+106:        if: inputs.action == 'deploy' || inputs.action == 'destroy'
+113:          bash scripts/configure-eks-kubeconfig.sh
+115:      - name: Deploy
+116:        if: inputs.action == 'deploy'
+140:          kubectl apply -f k8s/aws/namespace.yaml
+171:      - name: Destroy
+172:        if: inputs.action == 'destroy'
+174:          kubectl delete namespace "$NAMESPACE" \
+178:        if: always() && inputs.action != 'validate'
+190:        if: always() && inputs.action != 'validate'
+
+============================================================
+5. COMPARACAO COM BRANCH REMOTA
+============================================================
+From https://github.com/michaelhion/tc_fiap_oficina360_k8s_infra
+ * branch            release/fase-3 -> FETCH_HEAD
+Commit remoto: 0e5769362006df240aab8766f890835ac76a6322
+[OK] Workflow local e remoto sao identicos
+[OK] Workflow remoto usa configure-eks-kubeconfig.sh
+
+============================================================
+6. ULTIMA EXECUCAO DO GITHUB ACTIONS
+============================================================
+[{"conclusion":"success","databaseId":39179910333,"displayTitle":"Aplicacao","event":"workflow_dispatch","headBranch":"release/fase-3","headSha":"0e5769362006df240aab8766f890835ac76a6322","status":"completed","url":"https://github.com/michaelhion/tc_fiap_oficina360_k8s_infra/actions/runs/39179910333"}]
+Ultima execucao: id=39179910333 branch=release/fase-3 sha=0e5769362006df240aab8766f890835ac76a6322
+[OK] Ultima execucao usou a branch local atual
+[OK] Ultima execucao usou o commit local atual
+--- Jobs da ultima execucao ---
+{"jobs":[{"completedAt":"2026-10-19T00:15:05Z","conclusion":"success","databaseId":117830268180,"name":"application","startedAt":"2026-10-19T00:14:59Z","status":"completed","steps":[{"conclusion":"success","name":"Set up job","number":1,"status":"completed"},{"conclusion":"success","name":"Checkout","number":2,"status":"completed"},{"conclusion":"skipped","name":"Validar imagem","number":3,"status":"completed"},{"conclusion":"success","name":"Instalar kubeconform","number":4,"status":"completed"},{"conclusion":"success","name":"Validar manifests","number":5,"status":"completed"},{"conclusion":"skipped","name":"Configurar credenciais AWS","number":6,"status":"completed"},{"conclusion":"skipped","name":"Configurar cluster sem DescribeCluster","number":7,"status":"completed"},{"conclusion":"skipped","name":"Deploy","number":8,"status":"completed"},{"conclusion":"skipped","name":"Destroy","number":9,"status":"completed"},{"conclusion":"skipped","name":"Gerar diagnostico","number":10,"status":"completed"},{"conclusion":"skipped","name":"Publicar diagnostico","number":11,"status":"completed"},{"conclusion":"success","name":"Post Checkout","number":22,"status":"completed"},{"conclusion":"success","name":"Complete job","number":23,"status":"completed"}],"url":"https://github.com/michaelhion/tc_fiap_oficina360_k8s_infra/actions/runs/39179910333/job/117830268180"}]}
+--- Linhas relevantes do log ---
+
+============================================================
+7. REPOSITORY VARIABLES
+============================================================
+[OK] Repository Variable EKS_CLUSTER_NAME existe
+[OK] Repository Variable EKS_CLUSTER_ENDPOINT existe
+[OK] Repository Variable EKS_CLUSTER_CA existe
+
+============================================================
+8. DIAGNOSTICO FINAL
+============================================================
+RESULTADO: DEPLOY NAO COMPROVADO; 1 ERRO(S), 0 AVISO(S)
+Aprovados: 18
+Avisos: 0
+Erros: 1
+Relatorio: aplicacao-deploy-diagnostico.txt

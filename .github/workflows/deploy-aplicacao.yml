@@ -1,5 +1,9 @@
 name: Aplicacao
 
+run-name: >-
+  Aplicacao - ${{ inputs.action }} -
+  ${{ inputs.image || 'sem-imagem' }}
+
 on:
   workflow_dispatch:
     inputs:
@@ -11,9 +15,10 @@ on:
           - validate
           - deploy
           - destroy
+
       image:
-        description: Imagem Docker Hub com tag Git SHA ou digest
-        required: true
+        description: Imagem Docker Hub com tag Git SHA ou digest, obrigatoria apenas no deploy
+        required: false
         type: string
 
 permissions:
@@ -25,16 +30,24 @@ concurrency:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  CLUSTER_NAME: oficina360
   NAMESPACE: oficina360
 
 jobs:
   application:
+    name: Aplicacao ${{ inputs.action }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Mostrar parametros da execucao
+        run: |
+          echo "action=${{ inputs.action }}"
+          echo "image=${{ inputs.image || 'nao informada' }}"
+          echo "branch=${GITHUB_REF_NAME}"
+          echo "commit=${GITHUB_SHA}"
 
       - name: Validar imagem
         if: inputs.action == 'deploy'
@@ -43,14 +56,29 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then
+          : "${IMAGE:?Informe a imagem para executar o deploy}"
+
+          if [[ "$IMAGE" =~ [[:space:]] ]]; then
+            echo "::error::Informe somente a referencia da imagem."
+            echo "::error::Nao use 'docker pull' e nao inclua espacos."
+            exit 1
+          fi
+
+          if [[ "$IMAGE" =~ ^[a-z0-9._-]+/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "Imagem por digest valida: $IMAGE"
             exit 0
           fi
 
-          if [[ ! "$IMAGE" =~ :[0-9a-f]{7,40}$ ]]; then
-            echo "::error::Use uma imagem com tag Git SHA ou digest sha256."
-            exit 1
+          if [[ "$IMAGE" =~ ^[a-z0-9._-]+/[a-z0-9._/-]+:[0-9a-f]{7,40}$ ]]; then
+            echo "Imagem com tag Git SHA valida: $IMAGE"
+            exit 0
           fi
+
+          echo "::error::Formato de imagem invalido."
+          echo "::error::Use usuario/repositorio:<git-sha>"
+          echo "::error::Ou usuario/repositorio@sha256:<digest>"
+          echo "::error::Exemplo: michaelhion/oficina360:70dc080a6f03abadf9abce77641f0e14845ecb66"
+          exit 1
 
       - name: Instalar kubeconform
         if: inputs.action == 'validate'
@@ -63,7 +91,8 @@ jobs:
             "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
 
           tar -xzf /tmp/kubeconform.tar.gz \
-            -C /tmp kubeconform
+            -C /tmp \
+            kubeconform
 
           sudo install \
             -m 0755 \
@@ -110,34 +139,75 @@ jobs:
           EKS_CLUSTER_ENDPOINT: ${{ vars.EKS_CLUSTER_ENDPOINT }}
           EKS_CLUSTER_CA: ${{ vars.EKS_CLUSTER_CA }}
         run: |
+          set -euo pipefail
+
+          : "${EKS_CLUSTER_NAME:?Repository Variable EKS_CLUSTER_NAME nao definida}"
+          : "${EKS_CLUSTER_ENDPOINT:?Repository Variable EKS_CLUSTER_ENDPOINT nao definida}"
+          : "${EKS_CLUSTER_CA:?Repository Variable EKS_CLUSTER_CA nao definida}"
+
           bash scripts/configure-eks-kubeconfig.sh
+
+      - name: Verificar permissoes Kubernetes
+        if: inputs.action == 'deploy' || inputs.action == 'destroy'
+        run: |
+          set -euo pipefail
+
+          echo "Contexto atual:"
+          kubectl config current-context
+
+          echo
+          echo "Nodes:"
+          kubectl get nodes -o wide
+
+          echo
+          echo "Permissao para consultar namespaces:"
+          kubectl auth can-i get namespaces
+
+          if [[ "${{ inputs.action }}" == "deploy" ]]; then
+            echo
+            echo "Permissao para criar namespaces:"
+            kubectl auth can-i create namespaces
+
+            echo
+            echo "Permissao para criar deployments:"
+            kubectl auth can-i create deployments \
+              --namespace "$NAMESPACE"
+          fi
 
       - name: Deploy
         if: inputs.action == 'deploy'
         env:
           IMAGE: ${{ inputs.image }}
+
+          DB_HOST: ${{ vars.DB_HOST }}
+          DB_PORT: ${{ vars.DB_PORT }}
+          DB_NAME: ${{ vars.DB_NAME }}
+
           DB_USERNAME: ${{ secrets.DB_USERNAME }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
         run: |
           set -euo pipefail
 
-          DB_HOST="$(aws ssm get-parameter \
-            --name '/oficina360/database/host' \
-            --query 'Parameter.Value' \
-            --output text)"
+          : "${IMAGE:?Input image nao informado}"
 
-          DB_PORT="$(aws ssm get-parameter \
-            --name '/oficina360/database/port' \
-            --query 'Parameter.Value' \
-            --output text)"
+          : "${DB_HOST:?Repository Variable DB_HOST nao definida}"
+          : "${DB_PORT:?Repository Variable DB_PORT nao definida}"
+          : "${DB_NAME:?Repository Variable DB_NAME nao definida}"
 
-          DB_NAME="$(aws ssm get-parameter \
-            --name '/oficina360/database/name' \
-            --query 'Parameter.Value' \
-            --output text)"
+          : "${DB_USERNAME:?GitHub Secret DB_USERNAME nao definido}"
+          : "${DB_PASSWORD:?GitHub Secret DB_PASSWORD nao definido}"
+          : "${JWT_SECRET:?GitHub Secret JWT_SECRET nao definido}"
 
-          kubectl apply -f k8s/aws/namespace.yaml
+          echo "===== CRIANDO NAMESPACE ====="
+
+          kubectl apply \
+            -f k8s/aws/namespace.yaml
+
+          kubectl get namespace "$NAMESPACE"
+
+          echo
+          echo "===== CRIANDO CONFIGMAP ====="
 
           kubectl create configmap oficina360-config \
             --namespace "$NAMESPACE" \
@@ -146,44 +216,199 @@ jobs:
             --from-literal=DB_PORT="$DB_PORT" \
             --from-literal=DB_NAME="$DB_NAME" \
             --from-literal=SERVER_PORT=8081 \
-            --dry-run=client -o yaml \
-            | kubectl apply -f -
+            --dry-run=client \
+            --output yaml |
+            kubectl apply -f -
+
+          echo
+          echo "===== CRIANDO SECRET ====="
 
           kubectl create secret generic oficina360-secret \
             --namespace "$NAMESPACE" \
             --from-literal=DB_USERNAME="$DB_USERNAME" \
             --from-literal=DB_PASSWORD="$DB_PASSWORD" \
             --from-literal=JWT_SECRET="$JWT_SECRET" \
-            --dry-run=client -o yaml \
-            | kubectl apply -f -
+            --dry-run=client \
+            --output yaml |
+            kubectl apply -f -
+
+          echo
+          echo "===== RENDERIZANDO DEPLOYMENT ====="
 
           export IMAGE
-          envsubst '${IMAGE}' < k8s/aws/api-deployment.yaml \
+
+          envsubst '${IMAGE}' \
+            < k8s/aws/api-deployment.yaml \
             > /tmp/api-deployment.yaml
 
-          kubectl apply -f /tmp/api-deployment.yaml
-          kubectl apply -f k8s/aws/api-service.yaml
+          echo
+          echo "===== APLICANDO RECURSOS ====="
 
-          kubectl rollout status deployment/oficina360-api \
+          kubectl apply \
+            -f /tmp/api-deployment.yaml
+
+          kubectl apply \
+            -f k8s/aws/api-service.yaml
+
+          echo
+          echo "===== AGUARDANDO ROLLOUT ====="
+
+          kubectl rollout status \
+            deployment/oficina360-api \
             --namespace "$NAMESPACE" \
             --timeout=5m
+
+          echo
+          echo "===== RECURSOS IMPLANTADOS ====="
+
+          kubectl get deployment,pod,service \
+            --namespace "$NAMESPACE" \
+            --output wide
+
+          echo
+          echo "===== IMAGEM IMPLANTADA ====="
+
+          DEPLOYED_IMAGE="$(
+            kubectl get deployment oficina360-api \
+              --namespace "$NAMESPACE" \
+              --output jsonpath='{.spec.template.spec.containers[0].image}'
+          )"
+
+          echo "$DEPLOYED_IMAGE"
+
+          if [[ "$DEPLOYED_IMAGE" != "$IMAGE" ]]; then
+            echo "::error::Imagem implantada diferente da imagem solicitada."
+            echo "::error::Solicitada: $IMAGE"
+            echo "::error::Implantada: $DEPLOYED_IMAGE"
+            exit 1
+          fi
+
+          echo
+          echo "===== ESTADO DOS PODS ====="
+
+          kubectl get pods \
+            --namespace "$NAMESPACE" \
+            --selector app=oficina360-api \
+            --output jsonpath='{range .items[*]}{.metadata.name}{" status="}{.status.phase}{" ready="}{.status.containerStatuses[0].ready}{" restarts="}{.status.containerStatuses[0].restartCount}{"\n"}{end}'
+
+      - name: Verificar deploy
+        if: inputs.action == 'deploy'
+        run: |
+          set -euo pipefail
+
+          kubectl get namespace "$NAMESPACE"
+
+          kubectl get configmap oficina360-config \
+            --namespace "$NAMESPACE"
+
+          kubectl get secret oficina360-secret \
+            --namespace "$NAMESPACE"
+
+          kubectl get service oficina360-api \
+            --namespace "$NAMESPACE"
+
+          kubectl rollout status \
+            deployment/oficina360-api \
+            --namespace "$NAMESPACE" \
+            --timeout=1m
+
+          READY_REPLICAS="$(
+            kubectl get deployment oficina360-api \
+              --namespace "$NAMESPACE" \
+              --output jsonpath='{.status.readyReplicas}'
+          )"
+
+          AVAILABLE_REPLICAS="$(
+            kubectl get deployment oficina360-api \
+              --namespace "$NAMESPACE" \
+              --output jsonpath='{.status.availableReplicas}'
+          )"
+
+          if [[ "${READY_REPLICAS:-0}" -lt 1 ]]; then
+            echo "::error::Deployment sem replicas prontas."
+            exit 1
+          fi
+
+          if [[ "${AVAILABLE_REPLICAS:-0}" -lt 1 ]]; then
+            echo "::error::Deployment sem replicas disponiveis."
+            exit 1
+          fi
+
+          echo "Deploy validado com sucesso."
 
       - name: Destroy
         if: inputs.action == 'destroy'
         run: |
+          set -euo pipefail
+
           kubectl delete namespace "$NAMESPACE" \
-            --ignore-not-found=true
+            --ignore-not-found=true \
+            --wait=true \
+            --timeout=5m
+
+          if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+            echo "::error::Namespace $NAMESPACE ainda existe."
+            exit 1
+          fi
+
+          echo "Namespace $NAMESPACE removido."
 
       - name: Gerar diagnostico
         if: always() && inputs.action != 'validate'
         run: |
           {
-            echo '===== WORKLOADS ====='
-            kubectl get all -n "$NAMESPACE" -o wide || true
+            echo "===== EXECUCAO ====="
+            echo "action=${{ inputs.action }}"
+            echo "branch=${GITHUB_REF_NAME}"
+            echo "commit=${GITHUB_SHA}"
+
             echo
-            echo '===== EVENTS ====='
-            kubectl get events -n "$NAMESPACE" \
+            echo "===== CONTEXTO ====="
+            kubectl config current-context || true
+
+            echo
+            echo "===== NODES ====="
+            kubectl get nodes -o wide || true
+
+            echo
+            echo "===== NAMESPACE ====="
+            kubectl get namespace "$NAMESPACE" || true
+
+            echo
+            echo "===== WORKLOADS ====="
+            kubectl get all \
+              --namespace "$NAMESPACE" \
+              --output wide || true
+
+            echo
+            echo "===== CONFIGMAP ====="
+            kubectl get configmap oficina360-config \
+              --namespace "$NAMESPACE" || true
+
+            echo
+            echo "===== SECRET KEYS ====="
+            kubectl get secret oficina360-secret \
+              --namespace "$NAMESPACE" \
+              --output jsonpath='{.data}' || true
+
+            echo
+            echo
+            echo "===== EVENTS ====="
+            kubectl get events \
+              --namespace "$NAMESPACE" \
               --sort-by=.lastTimestamp || true
+
+            echo
+            echo "===== DEPLOYMENT DESCRIPTION ====="
+            kubectl describe deployment oficina360-api \
+              --namespace "$NAMESPACE" || true
+
+            echo
+            echo "===== POD DESCRIPTIONS ====="
+            kubectl describe pods \
+              --namespace "$NAMESPACE" \
+              --selector app=oficina360-api || true
+
           } > application-diagnostics.txt 2>&1
 
       - name: Publicar diagnostico
