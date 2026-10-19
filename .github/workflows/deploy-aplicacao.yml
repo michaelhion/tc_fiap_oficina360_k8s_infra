@@ -211,7 +211,7 @@ jobs:
 
           kubectl create configmap oficina360-config \
             --namespace "$NAMESPACE" \
-            --from-literal=SPRING_PROFILES_ACTIVE=aws \
+            --from-literal=SPRING_PROFILES_ACTIVE=docker \
             --from-literal=DB_HOST="$DB_HOST" \
             --from-literal=DB_PORT="$DB_PORT" \
             --from-literal=DB_NAME="$DB_NAME" \
