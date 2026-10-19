@@ -3,71 +3,46 @@ set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
 
-CLUSTER_NAME="$(
-  aws ssm get-parameter \
-    --name "/oficina360/cluster/name" \
-    --region "$AWS_REGION" \
-    --query "Parameter.Value" \
-    --output text
-)"
+: "${EKS_CLUSTER_NAME:?EKS_CLUSTER_NAME nao definida}"
+: "${EKS_CLUSTER_ENDPOINT:?EKS_CLUSTER_ENDPOINT nao definida}"
+: "${EKS_CLUSTER_CA:?EKS_CLUSTER_CA nao definida}"
 
-CLUSTER_ENDPOINT="$(
-  aws ssm get-parameter \
-    --name "/oficina360/cluster/endpoint" \
-    --region "$AWS_REGION" \
-    --query "Parameter.Value" \
-    --output text
-)"
+KUBECONFIG_PATH="${KUBECONFIG:-${HOME}/.kube/config}"
 
-CLUSTER_CA="$(
-  aws ssm get-parameter \
-    --name "/oficina360/cluster/certificate-authority" \
-    --region "$AWS_REGION" \
-    --query "Parameter.Value" \
-    --output text
-)"
+mkdir -p "$(dirname "$KUBECONFIG_PATH")"
 
-if [[ -z "$CLUSTER_NAME" || "$CLUSTER_NAME" == "None" ]]; then
-  echo "::error::Nome do cluster não encontrado no Parameter Store."
-  exit 1
-fi
+cat > "$KUBECONFIG_PATH" <<YAML
+apiVersion: v1
+kind: Config
+clusters:
+  - name: oficina360
+    cluster:
+      server: ${EKS_CLUSTER_ENDPOINT}
+      certificate-authority-data: ${EKS_CLUSTER_CA}
+contexts:
+  - name: oficina360
+    context:
+      cluster: oficina360
+      user: oficina360-aws
+current-context: oficina360
+users:
+  - name: oficina360-aws
+    user:
+      exec:
+        apiVersion: client.authentication.k8s.io/v1beta1
+        command: aws
+        args:
+          - eks
+          - get-token
+          - --cluster-name
+          - ${EKS_CLUSTER_NAME}
+          - --region
+          - ${AWS_REGION}
+YAML
 
-if [[ -z "$CLUSTER_ENDPOINT" || "$CLUSTER_ENDPOINT" == "None" ]]; then
-  echo "::error::Endpoint do cluster não encontrado no Parameter Store."
-  exit 1
-fi
+chmod 600 "$KUBECONFIG_PATH"
 
-if [[ -z "$CLUSTER_CA" || "$CLUSTER_CA" == "None" ]]; then
-  echo "::error::CA do cluster não encontrada no Parameter Store."
-  exit 1
-fi
+export KUBECONFIG="$KUBECONFIG_PATH"
 
-mkdir -p "$HOME/.kube"
-
-printf '%s' "$CLUSTER_CA" |
-  base64 --decode \
-  > /tmp/oficina360-ca.crt
-
-kubectl config set-cluster "$CLUSTER_NAME" \
-  --server="$CLUSTER_ENDPOINT" \
-  --certificate-authority=/tmp/oficina360-ca.crt \
-  --embed-certs=true
-
-kubectl config set-credentials oficina360-aws \
-  --exec-command=aws \
-  --exec-api-version=client.authentication.k8s.io/v1beta1 \
-  --exec-arg=eks \
-  --exec-arg=get-token \
-  --exec-arg=--cluster-name \
-  --exec-arg="$CLUSTER_NAME" \
-  --exec-arg=--region \
-  --exec-arg="$AWS_REGION"
-
-kubectl config set-context oficina360 \
-  --cluster="$CLUSTER_NAME" \
-  --user=oficina360-aws
-
-kubectl config use-context oficina360
-
-echo "Contexto configurado sem eks:DescribeCluster."
+echo "Contexto configurado: $(kubectl config current-context)"
 kubectl get nodes -o wide

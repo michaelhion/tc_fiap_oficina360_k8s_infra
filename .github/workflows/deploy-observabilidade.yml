@@ -46,9 +46,17 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: Configure cluster
+
+      - name: Configurar cluster sem DescribeCluster
         if: inputs.action == 'deploy' || inputs.action == 'destroy'
-        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
+        working-directory: .
+        env:
+          EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+          EKS_CLUSTER_ENDPOINT: ${{ vars.EKS_CLUSTER_ENDPOINT }}
+          EKS_CLUSTER_CA: ${{ vars.EKS_CLUSTER_CA }}
+        run: |
+          bash scripts/configure-eks-kubeconfig.sh
+
       - name: Deploy
         if: inputs.action == 'deploy'
         env:

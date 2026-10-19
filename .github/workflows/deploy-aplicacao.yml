@@ -105,6 +105,10 @@ jobs:
       - name: Configurar cluster sem DescribeCluster
         if: inputs.action == 'deploy' || inputs.action == 'destroy'
         working-directory: .
+        env:
+          EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+          EKS_CLUSTER_ENDPOINT: ${{ vars.EKS_CLUSTER_ENDPOINT }}
+          EKS_CLUSTER_CA: ${{ vars.EKS_CLUSTER_CA }}
         run: |
           bash scripts/configure-eks-kubeconfig.sh
 

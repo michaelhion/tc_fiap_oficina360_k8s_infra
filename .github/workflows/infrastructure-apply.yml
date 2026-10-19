@@ -156,18 +156,15 @@ jobs:
         if: inputs.action == 'deploy'
         run: terraform apply -auto-approve tfplan
 
-      - name: Configure kubectl
+      - name: Configurar cluster sem DescribeCluster
         if: inputs.action == 'deploy'
+        working-directory: .
+        env:
+          EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+          EKS_CLUSTER_ENDPOINT: ${{ vars.EKS_CLUSTER_ENDPOINT }}
+          EKS_CLUSTER_CA: ${{ vars.EKS_CLUSTER_CA }}
         run: |
-          CLUSTER_NAME="$(
-            terraform output -raw cluster_name
-          )"
-
-          aws eks update-kubeconfig \
-            --region "$AWS_REGION" \
-            --name "$CLUSTER_NAME"
-
-          kubectl get nodes -o wide
+          bash scripts/configure-eks-kubeconfig.sh
 
       - name: Validate network parameters
         if: inputs.action == 'deploy'

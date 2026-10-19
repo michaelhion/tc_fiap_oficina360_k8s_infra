@@ -87,17 +87,43 @@ jobs:
             -backend-config="region=$AWS_REGION" \
             -backend-config="use_lockfile=true"
 
-      - name: Remover recursos Kubernetes externos ao Terraform
-        continue-on-error: true
+      - name: Configurar cluster sem DescribeCluster
+        working-directory: .
+        env:
+          EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+          EKS_CLUSTER_ENDPOINT: ${{ vars.EKS_CLUSTER_ENDPOINT }}
+          EKS_CLUSTER_CA: ${{ vars.EKS_CLUSTER_CA }}
         run: |
-          CLUSTER_NAME="$(terraform output -raw cluster_name)"
-          aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
-          helm uninstall alloy -n observability || true
-          helm uninstall grafana -n observability || true
-          helm uninstall loki -n observability || true
-          helm uninstall kong -n kong || true
-          kubectl delete service --all -n observability --ignore-not-found=true || true
-          kubectl delete service --all -n kong --ignore-not-found=true || true
+          bash scripts/configure-eks-kubeconfig.sh
+
+      - name: Remover recursos Kubernetes externos ao Terraform
+        working-directory: .
+        run: |
+          set +e
+
+          helm uninstall alloy \
+            --namespace observability
+
+          helm uninstall grafana \
+            --namespace observability
+
+          helm uninstall loki \
+            --namespace observability
+
+          helm uninstall kong \
+            --namespace kong
+
+          kubectl delete namespace observability \
+            --ignore-not-found=true \
+            --wait=true \
+            --timeout=5m
+
+          kubectl delete namespace kong \
+            --ignore-not-found=true \
+            --wait=true \
+            --timeout=5m
+
+          exit 0
 
       - name: Aguardar remocao dos Load Balancers da VPC
         run: |
