@@ -15,6 +15,12 @@ resource "aws_eks_cluster" "main" {
     endpoint_private_access = true
     public_access_cidrs     = [var.allowed_cidr]
   }
+
+  lifecycle {
+    ignore_changes = [
+      role_arn
+    ]
+  }
 }
 
 resource "aws_eks_node_group" "main" {
