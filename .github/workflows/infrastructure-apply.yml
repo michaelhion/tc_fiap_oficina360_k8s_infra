@@ -1,5 +1,7 @@
 name: Infrastructure Apply
 
+run-name: Infrastructure ${{ inputs.action }} - Kubernetes ${{ inputs.kubernetes_version }}
+
 on:
   workflow_dispatch:
     inputs:
@@ -36,6 +38,7 @@ jobs:
   infrastructure:
     name: Infrastructure ${{ inputs.action }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     defaults:
       run:
@@ -48,11 +51,21 @@ jobs:
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.14.0"
+          terraform_wrapper: false
+
+      - name: Mostrar parametros da execucao
+        working-directory: .
+        run: |
+          echo "action=${{ inputs.action }}"
+          echo "kubernetes_version=${{ inputs.kubernetes_version }}"
+          echo "branch=${GITHUB_REF_NAME}"
+          echo "commit=${GITHUB_SHA}"
 
       - name: Terraform format
         run: terraform fmt -check -recursive
 
-      # Validação local, sem acessar o backend S3.
       - name: Terraform init for validation
         if: inputs.action == 'validate'
         run: terraform init -backend=false
@@ -64,7 +77,6 @@ jobs:
           TF_VAR_eks_node_role_arn: arn:aws:iam::000000000000:role/validation-LabEksNodeRole-x
         run: terraform validate
 
-      # A partir daqui somente deploy precisa de AWS.
       - name: Configure AWS credentials
         if: inputs.action == 'deploy'
         uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
@@ -74,44 +86,18 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Publicar diagnostico
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: learner-lab-permissions
-          path: learner-lab-permissions.txt
-          retention-days: 1
-
-      - name: Definir backend Terraform
+      - name: Validar identidade AWS
         if: inputs.action == 'deploy'
+        timeout-minutes: 1
         working-directory: .
         run: |
           set -euo pipefail
-
-          ACCOUNT_ID="$(
-            aws sts get-caller-identity \
-              --query Account \
-              --output text
-          )"
-
-          BUCKET="oficina360-tfstate-${ACCOUNT_ID}-${AWS_REGION}"
-
-          echo "TF_STATE_BUCKET=$BUCKET" >> "$GITHUB_ENV"
-          echo "Backend configurado: $BUCKET"
-
-      - name: Terraform init with remote backend
-        if: inputs.action == 'deploy'
-        run: |
-          terraform init \
-            -backend-config="bucket=$TF_STATE_BUCKET" \
-            -backend-config="key=oficina360/lab.tfstate" \
-            -backend-config="region=$AWS_REGION" \
-            -backend-config="use_lockfile=true"
-
-      - name: Terraform validate before deploy
-        if: inputs.action == 'deploy'
-        run: terraform validate
+          aws sts get-caller-identity
 
       - name: Configurar roles EKS
+        if: inputs.action == 'deploy'
+        timeout-minutes: 1
+        working-directory: .
         env:
           EKS_CLUSTER_ROLE_ARN: ${{ vars.EKS_CLUSTER_ROLE_ARN }}
           EKS_NODE_ROLE_ARN: ${{ vars.EKS_NODE_ROLE_ARN }}
@@ -121,48 +107,180 @@ jobs:
           : "${EKS_CLUSTER_ROLE_ARN:?Repository Variable EKS_CLUSTER_ROLE_ARN nao definida}"
           : "${EKS_NODE_ROLE_ARN:?Repository Variable EKS_NODE_ROLE_ARN nao definida}"
 
-          if [[ ! "$EKS_CLUSTER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksClusterRole.+$ ]]; then
-            echo "::error::EKS_CLUSTER_ROLE_ARN possui formato invalido."
+          if [[ ! "$EKS_CLUSTER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksClusterRole.*$ ]]; then
+            echo "::error::EKS_CLUSTER_ROLE_ARN nao aponta para uma LabEksClusterRole valida."
             exit 1
           fi
 
-          if [[ ! "$EKS_NODE_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksNodeRole.+$ ]]; then
-            echo "::error::EKS_NODE_ROLE_ARN possui formato invalido."
+          if [[ ! "$EKS_NODE_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksNodeRole.*$ ]]; then
+            echo "::error::EKS_NODE_ROLE_ARN nao aponta para uma LabEksNodeRole valida."
             exit 1
           fi
 
-          echo "TF_VAR_eks_cluster_role_arn=$EKS_CLUSTER_ROLE_ARN" \
-            >> "$GITHUB_ENV"
+          if [[ "$EKS_CLUSTER_ROLE_ARN" == "$EKS_NODE_ROLE_ARN" ]]; then
+            echo "::error::As roles do cluster e do node group nao podem ser iguais."
+            exit 1
+          fi
 
-          echo "TF_VAR_eks_node_role_arn=$EKS_NODE_ROLE_ARN" \
-            >> "$GITHUB_ENV"
+          echo "TF_VAR_eks_cluster_role_arn=$EKS_CLUSTER_ROLE_ARN" >> "$GITHUB_ENV"
+          echo "TF_VAR_eks_node_role_arn=$EKS_NODE_ROLE_ARN" >> "$GITHUB_ENV"
 
-          echo "Roles EKS configuradas pelas Repository Variables."
+          echo "Cluster role: ${EKS_CLUSTER_ROLE_ARN##*/}"
+          echo "Node role: ${EKS_NODE_ROLE_ARN##*/}"
+
+      - name: Configurar backend Terraform
+        if: inputs.action == 'deploy'
+        timeout-minutes: 1
+        working-directory: .
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_STATE_KEY: ${{ vars.TF_STATE_KEY || 'oficina360/lab.tfstate' }}
+        run: |
+          set -euo pipefail
+
+          : "${TF_STATE_BUCKET:?Repository Variable TF_STATE_BUCKET nao definida}"
+          : "${TF_STATE_KEY:?Repository Variable TF_STATE_KEY nao definida}"
+
+          echo "TF_STATE_BUCKET=$TF_STATE_BUCKET" >> "$GITHUB_ENV"
+          echo "TF_STATE_KEY=$TF_STATE_KEY" >> "$GITHUB_ENV"
+
+          echo "Backend bucket: $TF_STATE_BUCKET"
+          echo "Backend key: $TF_STATE_KEY"
+
+      - name: Terraform init with remote backend
+        if: inputs.action == 'deploy'
+        timeout-minutes: 5
+        env:
+          AWS_MAX_ATTEMPTS: "2"
+          AWS_RETRY_MODE: standard
+          AWS_PAGER: ""
+        run: |
+          set -euo pipefail
+
+          terraform init -reconfigure \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=$TF_STATE_KEY" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="use_lockfile=true"
+
+      - name: Terraform validate before deploy
+        if: inputs.action == 'deploy'
+        run: terraform validate
 
       - name: Terraform plan
         if: inputs.action == 'deploy'
-        run: terraform plan -out=tfplan
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+
+          terraform plan -out=tfplan
+
+          terraform show -no-color tfplan > /tmp/tfplan.txt
+          terraform show -json tfplan > /tmp/tfplan.json
+
+          echo "===== RESUMO DO PLANO ====="
+          grep -E \
+            'Plan:|will be imported|will be created|will be updated|will be destroyed|must be replaced' \
+            /tmp/tfplan.txt || true
+
+          if grep -q 'aws_eks_cluster.main must be replaced' /tmp/tfplan.txt; then
+            echo "::error::O plano tenta substituir o cluster EKS."
+            exit 1
+          fi
+
+          if grep -q 'aws_eks_cluster.main will be destroyed' /tmp/tfplan.txt; then
+            echo "::error::O plano tenta destruir o cluster EKS."
+            exit 1
+          fi
+
+          if grep -Eq 'Plan: .* [1-9][0-9]* to destroy' /tmp/tfplan.txt; then
+            echo "::error::O plano contem recursos para destruir."
+            grep 'Plan:' /tmp/tfplan.txt || true
+            exit 1
+          fi
+
+          NODE_ROLE="$( (jq -r '
+            [
+              .planned_values.root_module.resources[]?,
+              .planned_values.root_module.child_modules[]?.resources[]?
+            ]
+            | .[]
+            | select(.type == "aws_eks_node_group" and .name == "main")
+            | .values.node_role_arn
+          ' /tmp/tfplan.json 2>/dev/null || true) | head -n 1)"
+
+          if [[ -n "$NODE_ROLE" && "$NODE_ROLE" != "null" ]]; then
+            echo "Node role planejada: ${NODE_ROLE##*/}"
+
+            if [[ "$NODE_ROLE" != *LabEksNodeRole* ]]; then
+              echo "::error::O node group nao esta usando uma LabEksNodeRole."
+              echo "::error::Valor planejado: ${NODE_ROLE##*/}"
+              exit 1
+            fi
+
+            if [[ "$NODE_ROLE" == *LabEksClusterRole* ]]; then
+              echo "::error::Uma cluster role foi configurada no node group."
+              exit 1
+            fi
+          else
+            echo "Node group nao aparece no plano ou ja existe no state."
+          fi
+
+          echo "Plano aprovado para apply."
 
       - name: Terraform apply
         if: inputs.action == 'deploy'
-        run: terraform apply -auto-approve tfplan
+        timeout-minutes: 30
+        run: |
+          set -euo pipefail
+          terraform apply -auto-approve tfplan
 
       - name: Configurar cluster sem DescribeCluster
         if: inputs.action == 'deploy'
+        timeout-minutes: 3
         working-directory: .
         env:
           EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
           EKS_CLUSTER_ENDPOINT: ${{ vars.EKS_CLUSTER_ENDPOINT }}
           EKS_CLUSTER_CA: ${{ vars.EKS_CLUSTER_CA }}
         run: |
+          set -euo pipefail
+
+          : "${EKS_CLUSTER_NAME:?Repository Variable EKS_CLUSTER_NAME nao definida}"
+          : "${EKS_CLUSTER_ENDPOINT:?Repository Variable EKS_CLUSTER_ENDPOINT nao definida}"
+          : "${EKS_CLUSTER_CA:?Repository Variable EKS_CLUSTER_CA nao definida}"
+
           bash scripts/configure-eks-kubeconfig.sh
 
-      - name: Validate network parameters
+      - name: Validar cluster e node group
         if: inputs.action == 'deploy'
+        timeout-minutes: 5
         working-directory: .
         run: |
+          set -euo pipefail
+
+          kubectl get nodes -o wide
+          kubectl get pods --namespace kube-system --output wide
+
+          READY_NODES="$(kubectl get nodes --no-headers | awk '$2 == "Ready" {count++} END {print count+0}')"
+
+          if [[ "$READY_NODES" -lt 1 ]]; then
+            echo "::error::Nenhum node Ready encontrado."
+            exit 1
+          fi
+
+          echo "Nodes Ready: $READY_NODES"
+
+      - name: Validar parametros de rede
+        if: inputs.action == 'deploy'
+        timeout-minutes: 2
+        working-directory: .
+        run: |
+          set -euo pipefail
+
           aws ssm get-parameters-by-path \
             --path "/oficina360/network" \
             --recursive \
+            --region "$AWS_REGION" \
             --query 'Parameters[].{Name:Name,Value:Value}' \
             --output table
