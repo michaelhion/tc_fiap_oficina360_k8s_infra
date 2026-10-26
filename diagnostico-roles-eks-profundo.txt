@@ -1,0 +1,540 @@
+
+============================================================
+1. CONTEXTO LOCAL
+============================================================
+Data: 2026-10-26T19:59:28-03:00
+Diretorio: /mnt/c/Users/trabalho/Desktop/tech_challengers/tc_fiap_oficina360_k8s_infra
+[OK] Comando disponivel: git
+[OK] Comando disponivel: aws
+[OK] Comando disponivel: terraform
+[OK] Comando disponivel: gh
+[OK] Comando disponivel: jq
+[OK] Repositorio Git detectado
+Branch: release/fase-3
+Commit: 16cf447083fb87450801dacf12027872d4fda2f7
+Origin: https://github.com/michaelhion/tc_fiap_oficina360_k8s_infra
+--- git status --short ---
+?? ckecao.sh
+?? diagnostico-roles-eks-profundo.txt
+
+============================================================
+2. CREDENCIAIS E IDENTIDADE AWS
+============================================================
+[OK] Credenciais AWS validas
+{
+    "UserId": "AROAU5L7L72K5B2KZM3VI:user5231828=michael.hion@outlook.com",
+    "Account": "337958928021",
+    "Arn": "arn:aws:sts::337958928021:assumed-role/voclabs/user5231828=michael.hion@outlook.com"
+}
+
+============================================================
+3. ROLES EKS EXISTENTES NA SESSAO ATUAL
+============================================================
+[OK] iam:ListRoles permitido
+Cluster role atual: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958-LabEksClusterRole-wKIMaxqyhir1
+Node role atual: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6
+[OK] LabEksClusterRole atual encontrada
+[OK] LabEksNodeRole atual encontrada
+
+============================================================
+4. REPOSITORY VARIABLES DO GITHUB
+============================================================
+[OK] GitHub CLI autenticado
+EKS_CLUSTER_ROLE_ARN=arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958-LabEksClusterRole-wKIMaxqyhir1
+EKS_NODE_ROLE_ARN=arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6
+TF_STATE_BUCKET=oficina360-tfstate-337958928021-us-east-1
+TF_STATE_KEY=oficina360/lab.tfstate (default)
+[OK] Repository Variable de cluster tem tipo correto
+[OK] Repository Variable de node tem tipo correto
+[OK] Repository Variable da cluster role corresponde a sessao atual
+[OK] Repository Variable da node role corresponde a sessao atual
+
+============================================================
+5. EXISTENCIA DAS ROLES REFERENCIADAS
+============================================================
+[OK] GH_CLUSTER existe: c234606a5894423l17383143t1w337958-LabEksClusterRole-wKIMaxqyhir1
+[OK] GH_NODE existe: c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6
+[OK] CURRENT_CLUSTER existe: c234606a5894423l17383143t1w337958-LabEksClusterRole-wKIMaxqyhir1
+[OK] CURRENT_NODE existe: c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6
+
+============================================================
+6. CONFIGURACAO TERRAFORM
+============================================================
+[OK] terraform/lab/eks.tf encontrado
+--- referencias de role em eks.tf ---
+1:resource "aws_eks_cluster" "main" {
+3:  role_arn = var.eks_cluster_role_arn
+20:    ignore_changes = [
+21:      role_arn
+26:resource "aws_eks_node_group" "main" {
+29:  node_role_arn   = var.eks_node_role_arn
+[OK] Existe exatamente um aws_eks_cluster.main
+[OK] Existe exatamente um aws_eks_node_group.main
+[OK] Node group usa var.eks_node_role_arn
+[OK] Cluster usa var.eks_cluster_role_arn
+[32m[1mSuccess![0m The configuration is valid.
+[0m
+[OK] terraform validate passou
+
+============================================================
+7. WORKFLOW LOCAL E REMOTO
+============================================================
+[OK] .github/workflows/infrastructure-apply.yml encontrado
+--- trechos relevantes do workflow local ---
+76:          TF_VAR_eks_cluster_role_arn: arn:aws:iam::000000000000:role/validation-LabEksClusterRole-x
+77:          TF_VAR_eks_node_role_arn: arn:aws:iam::000000000000:role/validation-LabEksNodeRole-x
+97:      - name: Configurar roles EKS
+102:          EKS_CLUSTER_ROLE_ARN: ${{ vars.EKS_CLUSTER_ROLE_ARN }}
+103:          EKS_NODE_ROLE_ARN: ${{ vars.EKS_NODE_ROLE_ARN }}
+107:          : "${EKS_CLUSTER_ROLE_ARN:?Repository Variable EKS_CLUSTER_ROLE_ARN nao definida}"
+108:          : "${EKS_NODE_ROLE_ARN:?Repository Variable EKS_NODE_ROLE_ARN nao definida}"
+110:          if [[ ! "$EKS_CLUSTER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksClusterRole.*$ ]]; then
+111:            echo "::error::EKS_CLUSTER_ROLE_ARN nao aponta para uma LabEksClusterRole valida."
+115:          if [[ ! "$EKS_NODE_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksNodeRole.*$ ]]; then
+116:            echo "::error::EKS_NODE_ROLE_ARN nao aponta para uma LabEksNodeRole valida."
+120:          if [[ "$EKS_CLUSTER_ROLE_ARN" == "$EKS_NODE_ROLE_ARN" ]]; then
+125:          echo "TF_VAR_eks_cluster_role_arn=$EKS_CLUSTER_ROLE_ARN" >> "$GITHUB_ENV"
+126:          echo "TF_VAR_eks_node_role_arn=$EKS_NODE_ROLE_ARN" >> "$GITHUB_ENV"
+128:          echo "Cluster role: ${EKS_CLUSTER_ROLE_ARN##*/}"
+129:          echo "Node role: ${EKS_NODE_ROLE_ARN##*/}"
+170:      - name: Terraform plan
+202:          NODE_ROLE="$( (jq -r '
+231:      - name: Terraform apply
+[OK] Workflow local exporta node role corretamente
+[OK] Workflow local exporta cluster role corretamente
+From https://github.com/michaelhion/tc_fiap_oficina360_k8s_infra
+ * branch            release/fase-3 -> FETCH_HEAD
+Commit remoto: 16cf447083fb87450801dacf12027872d4fda2f7
+[OK] Commit local corresponde ao remoto
+[OK] Workflow local e remoto sao identicos
+
+============================================================
+8. STATE REMOTO E RECURSOS ATUAIS
+============================================================
+[OK] State remoto acessivel
+data.aws_availability_zones.available
+aws_eks_addon.vpc_cni
+aws_eks_cluster.main
+aws_security_group.database_access
+aws_ssm_parameter.cluster_ca
+aws_ssm_parameter.cluster_endpoint
+aws_ssm_parameter.cluster_name
+aws_ssm_parameter.database_access_security_group_id
+aws_ssm_parameter.subnet_ids
+aws_ssm_parameter.vpc_id
+module.vpc.aws_default_network_acl.this[0]
+module.vpc.aws_default_route_table.default[0]
+module.vpc.aws_default_security_group.this[0]
+module.vpc.aws_internet_gateway.this[0]
+module.vpc.aws_route.public_internet_gateway[0]
+module.vpc.aws_route_table.public[0]
+module.vpc.aws_route_table_association.public[0]
+module.vpc.aws_route_table_association.public[1]
+module.vpc.aws_subnet.public[0]
+module.vpc.aws_subnet.public[1]
+module.vpc.aws_vpc.this[0]
+[OK] Cluster presente no state
+[OK] Node group ainda nao consta no state, coerente com a falha
+[OK] Cluster EKS existe
+Cluster status: ACTIVE
+Cluster role real: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958-LabEksClusterRole-X2PzKB5bFFj1
+[OK] Node group ainda nao existe na AWS
+
+============================================================
+9. ULTIMA EXECUCAO DO GITHUB ACTIONS
+============================================================
+[{"conclusion":"failure","databaseId":40416171748,"headBranch":"release/fase-3","headSha":"16cf447083fb87450801dacf12027872d4fda2f7","status":"completed","url":"https://github.com/michaelhion/tc_fiap_oficina360_k8s_infra/actions/runs/40416171748"}]
+Run ID: 40416171748
+Run branch: release/fase-3
+Run SHA: 16cf447083fb87450801dacf12027872d4fda2f7
+[OK] Ultimo run usou o commit local
+Infrastructure deploy	Configurar roles EKS	2026-10-26T22:56:18.9875936Z [36;1mif [[ ! "$EKS_CLUSTER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksClusterRole.*$ ]]; then[0m
+Infrastructure deploy	Configurar roles EKS	2026-10-26T22:56:18.9876262Z [36;1m  echo "::error::EKS_CLUSTER_ROLE_ARN nao aponta para uma LabEksClusterRole valida."[0m
+Infrastructure deploy	Configurar roles EKS	2026-10-26T22:56:18.9876905Z [36;1mif [[ ! "$EKS_NODE_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/.+LabEksNodeRole.*$ ]]; then[0m
+Infrastructure deploy	Configurar roles EKS	2026-10-26T22:56:18.9877198Z [36;1m  echo "::error::EKS_NODE_ROLE_ARN nao aponta para uma LabEksNodeRole valida."[0m
+Infrastructure deploy	Configurar roles EKS	2026-10-26T22:56:18.9878833Z [36;1mecho "TF_VAR_eks_cluster_role_arn=$EKS_CLUSTER_ROLE_ARN" >> "$GITHUB_ENV"[0m
+Infrastructure deploy	Configurar roles EKS	2026-10-26T22:56:18.9879103Z [36;1mecho "TF_VAR_eks_node_role_arn=$EKS_NODE_ROLE_ARN" >> "$GITHUB_ENV"[0m
+Infrastructure deploy	Configurar roles EKS	2026-10-26T22:56:18.9879443Z [36;1mecho "Cluster role: ${EKS_CLUSTER_ROLE_ARN##*/}"[0m
+Infrastructure deploy	Configurar roles EKS	2026-10-26T22:56:18.9879643Z [36;1mecho "Node role: ${EKS_NODE_ROLE_ARN##*/}"[0m
+Infrastructure deploy	Configurar roles EKS	2026-10-26T22:56:18.9935706Z   EKS_CLUSTER_ROLE_ARN: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958-LabEksClusterRole-wKIMaxqyhir1
+Infrastructure deploy	Configurar roles EKS	2026-10-26T22:56:18.9936112Z   EKS_NODE_ROLE_ARN: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6
+Infrastructure deploy	Configurar roles EKS	2026-10-26T22:56:19.0002011Z Cluster role: c234606a5894423l17383143t1w337958-LabEksClusterRole-wKIMaxqyhir1
+Infrastructure deploy	Configurar roles EKS	2026-10-26T22:56:19.0002342Z Node role: c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6
+Infrastructure deploy	Configurar backend Terraform	2026-10-26T22:56:19.0089727Z   TF_VAR_eks_cluster_role_arn: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958-LabEksClusterRole-wKIMaxqyhir1
+Infrastructure deploy	Configurar backend Terraform	2026-10-26T22:56:19.0090155Z   TF_VAR_eks_node_role_arn: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6
+Infrastructure deploy	Terraform init with remote backend	2026-10-26T22:56:19.0219514Z   TF_VAR_eks_cluster_role_arn: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958-LabEksClusterRole-wKIMaxqyhir1
+Infrastructure deploy	Terraform init with remote backend	2026-10-26T22:56:19.0219941Z   TF_VAR_eks_node_role_arn: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6
+Infrastructure deploy	Terraform validate before deploy	2026-10-26T22:56:26.5624918Z   TF_VAR_eks_cluster_role_arn: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958-LabEksClusterRole-wKIMaxqyhir1
+Infrastructure deploy	Terraform validate before deploy	2026-10-26T22:56:26.5625468Z   TF_VAR_eks_node_role_arn: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6
+Infrastructure deploy	Terraform plan	﻿2026-10-26T22:56:28.2594394Z ##[group]Run set -euo pipefail
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2594628Z [36;1mset -euo pipefail[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2594761Z [36;1m[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2594883Z [36;1mterraform plan -out=tfplan[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2595031Z [36;1m[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2595178Z [36;1mterraform show -no-color tfplan > /tmp/tfplan.txt[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2595392Z [36;1mterraform show -json tfplan > /tmp/tfplan.json[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2595564Z [36;1m[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2595684Z [36;1mecho "===== RESUMO DO PLANO ====="[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2595847Z [36;1mgrep -E \[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2596074Z [36;1m  'Plan:|will be imported|will be created|will be updated|will be destroyed|must be replaced' \[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2596333Z [36;1m  /tmp/tfplan.txt || true[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2596475Z [36;1m[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2596795Z [36;1mif grep -q 'aws_eks_cluster.main must be replaced' /tmp/tfplan.txt; then[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2597055Z [36;1m  echo "::error::O plano tenta substituir o cluster EKS."[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2597256Z [36;1m  exit 1[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2597373Z [36;1mfi[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2597483Z [36;1m[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2597657Z [36;1mif grep -q 'aws_eks_cluster.main will be destroyed' /tmp/tfplan.txt; then[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2598127Z [36;1m  echo "::error::O plano tenta destruir o cluster EKS."[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2598321Z [36;1m  exit 1[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2598432Z [36;1mfi[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2598541Z [36;1m[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2598706Z [36;1mif grep -Eq 'Plan: .* [1-9][0-9]* to destroy' /tmp/tfplan.txt; then[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2598947Z [36;1m  echo "::error::O plano contem recursos para destruir."[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2599146Z [36;1m  grep 'Plan:' /tmp/tfplan.txt || true[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2599308Z [36;1m  exit 1[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2599428Z [36;1mfi[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2599539Z [36;1m[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2599664Z [36;1mNODE_ROLE="$( (jq -r '[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2599803Z [36;1m  [[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2599950Z [36;1m    .planned_values.root_module.resources[]?,[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2600174Z [36;1m    .planned_values.root_module.child_modules[]?.resources[]?[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2600367Z [36;1m  ][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2600476Z [36;1m  | .[][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2600635Z [36;1m  | select(.type == "aws_eks_node_group" and .name == "main")[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2600844Z [36;1m  | .values.node_role_arn[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2601024Z [36;1m' /tmp/tfplan.json 2>/dev/null || true) | head -n 1)"[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2601199Z [36;1m[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2601345Z [36;1mif [[ -n "$NODE_ROLE" && "$NODE_ROLE" != "null" ]]; then[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2601549Z [36;1m  echo "Node role planejada: ${NODE_ROLE##*/}"[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2601712Z [36;1m[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2601848Z [36;1m  if [[ "$NODE_ROLE" != *LabEksNodeRole* ]]; then[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2602076Z [36;1m    echo "::error::O node group nao esta usando uma LabEksNodeRole."[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2602307Z [36;1m    echo "::error::Valor planejado: ${NODE_ROLE##*/}"[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2602484Z [36;1m    exit 1[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2602602Z [36;1m  fi[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2602710Z [36;1m[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2602851Z [36;1m  if [[ "$NODE_ROLE" == *LabEksClusterRole* ]]; then[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2603081Z [36;1m    echo "::error::Uma cluster role foi configurada no node group."[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2603277Z [36;1m    exit 1[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2603396Z [36;1m  fi[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2603505Z [36;1melse[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2603667Z [36;1m  echo "Node group nao aparece no plano ou ja existe no state."[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2603860Z [36;1mfi[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2603967Z [36;1m[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2604091Z [36;1mecho "Plano aprovado para apply."[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2658365Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2658572Z env:
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2658693Z   AWS_REGION: us-east-1
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2658830Z   TF_IN_AUTOMATION: true
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2659100Z   TF_INPUT: false
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2659224Z   TF_VAR_aws_region: us-east-1
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2659374Z   TF_VAR_project_name: oficina360
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2659522Z   TF_VAR_kubernetes_version: 1.36
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2659667Z   AWS_DEFAULT_REGION: us-east-1
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2659892Z   AWS_ACCESS_KEY_ID: ***
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2660078Z   AWS_SECRET_ACCESS_KEY: ***
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2661874Z   AWS_SESSION_TOKEN: ***
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2662151Z   TF_VAR_eks_cluster_role_arn: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958-LabEksClusterRole-wKIMaxqyhir1
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2662576Z   TF_VAR_eks_node_role_arn: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2662898Z   TF_STATE_BUCKET: oficina360-tfstate-337958928021-us-east-1
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2663190Z   TF_STATE_KEY: oficina360/lab.tfstate
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:28.2663342Z ##[endgroup]
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:30.9526786Z [0m[1mdata.aws_availability_zones.available: Reading...[0m[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:30.9533152Z [0m[1mmodule.vpc.aws_vpc.this[0]: Refreshing state... [id=vpc-02064a2f15d8750a1][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:31.1702019Z [0m[1mdata.aws_availability_zones.available: Read complete after 0s [id=us-east-1][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:31.8873293Z [0m[1mmodule.vpc.aws_default_security_group.this[0]: Refreshing state... [id=sg-0174339fbf1de1c3f][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:31.8895616Z [0m[1maws_ssm_parameter.vpc_id: Refreshing state... [id=/oficina360/network/vpc-id][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:31.8896291Z [0m[1mmodule.vpc.aws_default_route_table.default[0]: Refreshing state... [id=rtb-07e80d832c797c41d][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:31.8931532Z [0m[1mmodule.vpc.aws_default_network_acl.this[0]: Refreshing state... [id=acl-0bff10f4075fcc5c2][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:31.8945825Z [0m[1maws_security_group.database_access: Refreshing state... [id=sg-076344d1be44e28d0][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:31.8949492Z [0m[1mmodule.vpc.aws_route_table.public[0]: Refreshing state... [id=rtb-0e21de019fc5728ef][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:31.8950366Z [0m[1mmodule.vpc.aws_subnet.public[1]: Refreshing state... [id=subnet-0a1162ad806bfd6d9][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:31.8951116Z [0m[1mmodule.vpc.aws_subnet.public[0]: Refreshing state... [id=subnet-0fc21297d9a5fdc43][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:31.8971210Z [0m[1mmodule.vpc.aws_internet_gateway.this[0]: Refreshing state... [id=igw-0c7e131a13562605f][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.1438121Z [0m[1mmodule.vpc.aws_route.public_internet_gateway[0]: Refreshing state... [id=r-rtb-0e21de019fc5728ef1080289494][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.1522092Z [0m[1maws_ssm_parameter.database_access_security_group_id: Refreshing state... [id=/oficina360/network/database-access-sg-id][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.1872190Z [0m[1mmodule.vpc.aws_route_table_association.public[0]: Refreshing state... [id=rtbassoc-0eb190ee0a0ed1108][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.1876002Z [0m[1mmodule.vpc.aws_route_table_association.public[1]: Refreshing state... [id=rtbassoc-079c5b64ea849a516][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.1879428Z [0m[1maws_ssm_parameter.subnet_ids: Refreshing state... [id=/oficina360/network/subnet-ids][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.1911887Z [0m[1maws_eks_cluster.main: Refreshing state... [id=oficina360][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.4741892Z [0m[1maws_ssm_parameter.cluster_ca: Refreshing state... [id=/oficina360/cluster/certificate-authority][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.4742833Z [0m[1maws_eks_addon.vpc_cni: Refreshing state... [id=oficina360:vpc-cni][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.4746757Z [0m[1maws_ssm_parameter.cluster_endpoint: Refreshing state... [id=/oficina360/cluster/endpoint][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.4747615Z [0m[1maws_ssm_parameter.cluster_name: Refreshing state... [id=/oficina360/cluster/name][0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7894536Z 
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7895231Z Terraform used the selected providers to generate the following execution
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7895735Z plan. Resource actions are indicated with the following symbols:
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7896340Z   [32m+[0m create[0m
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7896473Z 
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7897010Z Terraform will perform the following actions:
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7897151Z 
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7897263Z [1m  # aws_eks_addon.coredns[0m will be created
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7897487Z [0m  [32m+[0m[0m resource "aws_eks_addon" "coredns" {
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7897709Z       [32m+[0m[0m addon_name           = "coredns"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7898066Z       [32m+[0m[0m addon_version        = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7898426Z       [32m+[0m[0m arn                  = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7898743Z       [32m+[0m[0m cluster_name         = "oficina360"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7899059Z       [32m+[0m[0m configuration_values = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7899394Z       [32m+[0m[0m created_at           = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7899716Z       [32m+[0m[0m id                   = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7900226Z       [32m+[0m[0m modified_at          = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7900536Z       [32m+[0m[0m region               = "us-east-1"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7900830Z       [32m+[0m[0m tags_all             = {
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7901107Z           [32m+[0m[0m "Environment" = "lab"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7901393Z           [32m+[0m[0m "ManagedBy"   = "Terraform"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7901708Z           [32m+[0m[0m "Project"     = "oficina360"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7901929Z         }
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7902021Z 
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7902170Z       [32m+[0m[0m namespace_config (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7902453Z     }
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7902547Z 
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7902685Z [1m  # aws_eks_addon.kube_proxy[0m will be created
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7902908Z [0m  [32m+[0m[0m resource "aws_eks_addon" "kube_proxy" {
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7903214Z       [32m+[0m[0m addon_name           = "kube-proxy"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7903441Z       [32m+[0m[0m addon_version        = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7903719Z       [32m+[0m[0m arn                  = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7903985Z       [32m+[0m[0m cluster_name         = "oficina360"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7904204Z       [32m+[0m[0m configuration_values = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7904427Z       [32m+[0m[0m created_at           = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7904647Z       [32m+[0m[0m id                   = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7904864Z       [32m+[0m[0m modified_at          = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7905076Z       [32m+[0m[0m region               = "us-east-1"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7905271Z       [32m+[0m[0m tags_all             = {
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7905456Z           [32m+[0m[0m "Environment" = "lab"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7905687Z           [32m+[0m[0m "ManagedBy"   = "Terraform"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7905975Z           [32m+[0m[0m "Project"     = "oficina360"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7906131Z         }
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7906193Z 
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7906293Z       [32m+[0m[0m namespace_config (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7906456Z     }
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7906515Z 
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7906611Z [1m  # aws_eks_node_group.main[0m will be created
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7906830Z [0m  [32m+[0m[0m resource "aws_eks_node_group" "main" {
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7907062Z       [32m+[0m[0m ami_type               = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7907292Z       [32m+[0m[0m arn                    = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7907511Z       [32m+[0m[0m capacity_type          = "ON_DEMAND"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7907726Z       [32m+[0m[0m cluster_name           = "oficina360"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7908072Z       [32m+[0m[0m disk_size              = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7908298Z       [32m+[0m[0m id                     = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7908506Z       [32m+[0m[0m instance_types         = [
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7908697Z           [32m+[0m[0m "t3.large",
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7908836Z         ]
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7909008Z       [32m+[0m[0m node_group_name        = "oficina360-lab"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7909366Z       [32m+[0m[0m node_group_name_prefix = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7910415Z       [32m+[0m[0m node_role_arn          = "arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7910768Z       [32m+[0m[0m region                 = "us-east-1"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7910991Z       [32m+[0m[0m release_version        = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7911220Z       [32m+[0m[0m resources              = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7911451Z       [32m+[0m[0m status                 = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7911657Z       [32m+[0m[0m subnet_ids             = [
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7911859Z           [32m+[0m[0m "subnet-0a1162ad806bfd6d9",
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7912171Z           [32m+[0m[0m "subnet-0fc21297d9a5fdc43",
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7912326Z         ]
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7912470Z       [32m+[0m[0m tags_all               = {
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7912667Z           [32m+[0m[0m "Environment" = "lab"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7912861Z           [32m+[0m[0m "ManagedBy"   = "Terraform"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7913061Z           [32m+[0m[0m "Project"     = "oficina360"
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7913216Z         }
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7913382Z       [32m+[0m[0m version                = (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7913509Z 
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7913613Z       [32m+[0m[0m node_repair_config (known after apply)
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7913737Z 
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7913816Z       [32m+[0m[0m scaling_config {
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7913990Z           [32m+[0m[0m desired_size = 1
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7914166Z           [32m+[0m[0m max_size     = 1
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7914339Z           [32m+[0m[0m min_size     = 1
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7914483Z         }
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7914543Z 
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7914617Z       [32m+[0m[0m update_config {
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7914798Z           [32m+[0m[0m max_unavailable = 1
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7914948Z         }
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7915048Z     }
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7915109Z 
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:32.7915214Z [1mPlan:[0m [0m3 to add, 0 to change, 0 to destroy.
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:35.8684706Z ===== RESUMO DO PLANO =====
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:35.8698033Z   # aws_eks_addon.coredns will be created
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:35.8698338Z   # aws_eks_addon.kube_proxy will be created
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:35.8698602Z   # aws_eks_node_group.main will be created
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:35.8698804Z Plan: 3 to add, 0 to change, 0 to destroy.
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:35.8784228Z Node role planejada: c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6
+Infrastructure deploy	Terraform plan	2026-10-26T22:56:35.8784646Z Plano aprovado para apply.
+Infrastructure deploy	Terraform apply	﻿2026-10-26T22:56:35.8821531Z ##[group]Run set -euo pipefail
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8821725Z [36;1mset -euo pipefail[0m
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8821897Z [36;1mterraform apply -auto-approve tfplan[0m
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8874106Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8874293Z env:
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8874411Z   AWS_REGION: us-east-1
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8874546Z   TF_IN_AUTOMATION: true
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8874675Z   TF_INPUT: false
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8874800Z   TF_VAR_aws_region: us-east-1
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8874949Z   TF_VAR_project_name: oficina360
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8875095Z   TF_VAR_kubernetes_version: 1.36
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8875240Z   AWS_DEFAULT_REGION: us-east-1
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8875465Z   AWS_ACCESS_KEY_ID: ***
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8875651Z   AWS_SECRET_ACCESS_KEY: ***
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8877447Z   AWS_SESSION_TOKEN: ***
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8877728Z   TF_VAR_eks_cluster_role_arn: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958-LabEksClusterRole-wKIMaxqyhir1
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8878372Z   TF_VAR_eks_node_role_arn: arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8878696Z   TF_STATE_BUCKET: oficina360-tfstate-337958928021-us-east-1
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8878891Z   TF_STATE_KEY: oficina360/lab.tfstate
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:35.8879040Z ##[endgroup]
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:38.2565234Z [0m[1maws_eks_node_group.main: Creating...[0m[0m
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:39.0574375Z [31m╷[0m[0m
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:39.0576406Z [31m│[0m [0m[1m[31mError: [0m[0m[1mcreating EKS Node Group (oficina360:oficina360-lab): operation error EKS: CreateNodegroup, https response error StatusCode: 400, RequestID: 6d488e7d-8d63-4a33-a3cc-a77886c845ed, InvalidParameterException: The role with name c234606a5894423l17383143t1w337958-LabEksClusterRole-X2PzKB5bFFj1 cannot be found. (Service: AmazonIdentityManagement; Status Code: 404; Error Code: NoSuchEntity; Request ID: 1fd4ad74-b827-49cd-ba98-19fe6137c652; Proxy: null)[0m
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:39.0577754Z [31m│[0m [0m
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:39.0578210Z [31m│[0m [0m[0m  with aws_eks_node_group.main,
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:39.0578745Z [31m│[0m [0m  on eks.tf line 26, in resource "aws_eks_node_group" "main":
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:39.0579030Z [31m│[0m [0m  26: resource "aws_eks_node_group" "main" [4m{[0m[0m
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:39.0579231Z [31m│[0m [0m
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:39.0579362Z [31m╵[0m[0m
+Infrastructure deploy	Terraform apply	2026-10-26T22:56:39.1944896Z ##[error]Process completed with exit code 1.
+[ERRO] Ultimo run tentou usar role inexistente: c234606a5894423l17383143t1w337958-LabEksClusterRole-X2PzKB5bFFj1
+[ERRO] Ultimo run tentou usar CLUSTER ROLE no node group
+
+============================================================
+10. PLANO LOCAL DIAGNOSTICO
+============================================================
+[0m[1mdata.aws_availability_zones.available: Reading...[0m[0m
+[0m[1mmodule.vpc.aws_vpc.this[0]: Refreshing state... [id=vpc-02064a2f15d8750a1][0m
+[0m[1mdata.aws_availability_zones.available: Read complete after 0s [id=us-east-1][0m
+[0m[1maws_ssm_parameter.vpc_id: Refreshing state... [id=/oficina360/network/vpc-id][0m
+[0m[1mmodule.vpc.aws_default_security_group.this[0]: Refreshing state... [id=sg-0174339fbf1de1c3f][0m
+[0m[1mmodule.vpc.aws_default_route_table.default[0]: Refreshing state... [id=rtb-07e80d832c797c41d][0m
+[0m[1mmodule.vpc.aws_default_network_acl.this[0]: Refreshing state... [id=acl-0bff10f4075fcc5c2][0m
+[0m[1mmodule.vpc.aws_internet_gateway.this[0]: Refreshing state... [id=igw-0c7e131a13562605f][0m
+[0m[1maws_security_group.database_access: Refreshing state... [id=sg-076344d1be44e28d0][0m
+[0m[1mmodule.vpc.aws_route_table.public[0]: Refreshing state... [id=rtb-0e21de019fc5728ef][0m
+[0m[1mmodule.vpc.aws_subnet.public[0]: Refreshing state... [id=subnet-0fc21297d9a5fdc43][0m
+[0m[1mmodule.vpc.aws_subnet.public[1]: Refreshing state... [id=subnet-0a1162ad806bfd6d9][0m
+[0m[1maws_ssm_parameter.database_access_security_group_id: Refreshing state... [id=/oficina360/network/database-access-sg-id][0m
+[0m[1mmodule.vpc.aws_route.public_internet_gateway[0]: Refreshing state... [id=r-rtb-0e21de019fc5728ef1080289494][0m
+[0m[1mmodule.vpc.aws_route_table_association.public[0]: Refreshing state... [id=rtbassoc-0eb190ee0a0ed1108][0m
+[0m[1mmodule.vpc.aws_route_table_association.public[1]: Refreshing state... [id=rtbassoc-079c5b64ea849a516][0m
+[0m[1maws_ssm_parameter.subnet_ids: Refreshing state... [id=/oficina360/network/subnet-ids][0m
+[0m[1maws_eks_cluster.main: Refreshing state... [id=oficina360][0m
+[0m[1maws_ssm_parameter.cluster_endpoint: Refreshing state... [id=/oficina360/cluster/endpoint][0m
+[0m[1maws_ssm_parameter.cluster_name: Refreshing state... [id=/oficina360/cluster/name][0m
+[0m[1maws_ssm_parameter.cluster_ca: Refreshing state... [id=/oficina360/cluster/certificate-authority][0m
+[0m[1maws_eks_addon.vpc_cni: Refreshing state... [id=oficina360:vpc-cni][0m
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  [32m+[0m create[0m
+
+Terraform will perform the following actions:
+
+[1m  # aws_eks_addon.coredns[0m will be created
+[0m  [32m+[0m[0m resource "aws_eks_addon" "coredns" {
+      [32m+[0m[0m addon_name           = "coredns"
+      [32m+[0m[0m addon_version        = (known after apply)
+      [32m+[0m[0m arn                  = (known after apply)
+      [32m+[0m[0m cluster_name         = "oficina360"
+      [32m+[0m[0m configuration_values = (known after apply)
+      [32m+[0m[0m created_at           = (known after apply)
+      [32m+[0m[0m id                   = (known after apply)
+      [32m+[0m[0m modified_at          = (known after apply)
+      [32m+[0m[0m region               = "us-east-1"
+      [32m+[0m[0m tags_all             = {
+          [32m+[0m[0m "Environment" = "lab"
+          [32m+[0m[0m "ManagedBy"   = "Terraform"
+          [32m+[0m[0m "Project"     = "oficina360"
+        }
+
+      [32m+[0m[0m namespace_config (known after apply)
+    }
+
+[1m  # aws_eks_addon.kube_proxy[0m will be created
+[0m  [32m+[0m[0m resource "aws_eks_addon" "kube_proxy" {
+      [32m+[0m[0m addon_name           = "kube-proxy"
+      [32m+[0m[0m addon_version        = (known after apply)
+      [32m+[0m[0m arn                  = (known after apply)
+      [32m+[0m[0m cluster_name         = "oficina360"
+      [32m+[0m[0m configuration_values = (known after apply)
+      [32m+[0m[0m created_at           = (known after apply)
+      [32m+[0m[0m id                   = (known after apply)
+      [32m+[0m[0m modified_at          = (known after apply)
+      [32m+[0m[0m region               = "us-east-1"
+      [32m+[0m[0m tags_all             = {
+          [32m+[0m[0m "Environment" = "lab"
+          [32m+[0m[0m "ManagedBy"   = "Terraform"
+          [32m+[0m[0m "Project"     = "oficina360"
+        }
+
+      [32m+[0m[0m namespace_config (known after apply)
+    }
+
+[1m  # aws_eks_node_group.main[0m will be created
+[0m  [32m+[0m[0m resource "aws_eks_node_group" "main" {
+      [32m+[0m[0m ami_type               = (known after apply)
+      [32m+[0m[0m arn                    = (known after apply)
+      [32m+[0m[0m capacity_type          = "ON_DEMAND"
+      [32m+[0m[0m cluster_name           = "oficina360"
+      [32m+[0m[0m disk_size              = (known after apply)
+      [32m+[0m[0m id                     = (known after apply)
+      [32m+[0m[0m instance_types         = [
+          [32m+[0m[0m "t3.large",
+        ]
+      [32m+[0m[0m node_group_name        = "oficina360-lab"
+      [32m+[0m[0m node_group_name_prefix = (known after apply)
+      [32m+[0m[0m node_role_arn          = "arn:aws:iam::337958928021:role/c234606a5894423l17383143t1w337958928-LabEksNodeRole-XvIlWD5QRSo6"
+      [32m+[0m[0m region                 = "us-east-1"
+      [32m+[0m[0m release_version        = (known after apply)
+      [32m+[0m[0m resources              = (known after apply)
+      [32m+[0m[0m status                 = (known after apply)
+      [32m+[0m[0m subnet_ids             = [
+          [32m+[0m[0m "subnet-0a1162ad806bfd6d9",
+          [32m+[0m[0m "subnet-0fc21297d9a5fdc43",
+        ]
+      [32m+[0m[0m tags_all               = {
+          [32m+[0m[0m "Environment" = "lab"
+          [32m+[0m[0m "ManagedBy"   = "Terraform"
+          [32m+[0m[0m "Project"     = "oficina360"
+        }
+      [32m+[0m[0m version                = (known after apply)
+
+      [32m+[0m[0m node_repair_config (known after apply)
+
+      [32m+[0m[0m scaling_config {
+          [32m+[0m[0m desired_size = 1
+          [32m+[0m[0m max_size     = 1
+          [32m+[0m[0m min_size     = 1
+        }
+
+      [32m+[0m[0m update_config {
+          [32m+[0m[0m max_unavailable = 1
+        }
+    }
+
+[1mPlan:[0m [0m3 to add, 0 to change, 0 to destroy.
+[90m
+─────────────────────────────────────────────────────────────────────────────[0m
+
+Saved the plan to: /tmp/tmp.Jtjh1294sh/diagnostic.tfplan
+
+To perform exactly these actions, run the following command to apply:
+    terraform apply "/tmp/tmp.Jtjh1294sh/diagnostic.tfplan"
+Releasing state lock. This may take a few moments...
+[OK] Plano local gerado
+Node role no plano local: NAO ENCONTRADA
+[ERRO] Plano local nao usa a LabEksNodeRole atual
+[OK] Plano local preserva o cluster
+Resumo do plano: Plan: 3 to add, 0 to change, 0 to destroy.
+
+============================================================
+11. DIAGNOSTICO E CORRECAO SUGERIDA
+============================================================
+A role usada na falha foi: c234606a5894423l17383143t1w337958-LabEksClusterRole-X2PzKB5bFFj1
+Antes de um novo deploy, confirme no log do step Configurar roles EKS:
+Cluster role: ...LabEksClusterRole...
+Node role: ...LabEksNodeRole...
+E no step Terraform plan: Node role planejada: ...LabEksNodeRole...
+
+============================================================
+12. RESUMO
+============================================================
+Aprovados: 38
+Avisos: 0
+Erros: 3
+Relatorio: diagnostico-roles-eks-profundo.txt
+RESULTADO: 3 PROBLEMA(S) ENCONTRADO(S)
