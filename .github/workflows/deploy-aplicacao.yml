@@ -2,7 +2,7 @@ name: Aplicacao
 
 run-name: >-
   Aplicacao - ${{ inputs.action }} -
-  ${{ inputs.image || 'sem-imagem' }}
+  ${{ inputs.image || vars.DEFAULT_APP_IMAGE || 'michaelhion/oficina360:latest' }}
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ on:
           - destroy
 
       image:
-        description: Imagem Docker Hub com tag Git SHA ou digest, obrigatoria apenas no deploy
+        description: Imagem opcional. Se vazia, usa DEFAULT_APP_IMAGE ou michaelhion/oficina360:latest
         required: false
         type: string
 
@@ -31,6 +31,7 @@ concurrency:
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   NAMESPACE: oficina360
+  DEFAULT_APP_IMAGE: ${{ vars.DEFAULT_APP_IMAGE || 'michaelhion/oficina360:latest' }}
 
 jobs:
   application:
@@ -42,43 +43,46 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Mostrar parametros da execucao
-        run: |
-          echo "action=${{ inputs.action }}"
-          echo "image=${{ inputs.image || 'nao informada' }}"
-          echo "branch=${GITHUB_REF_NAME}"
-          echo "commit=${GITHUB_SHA}"
-
-      - name: Validar imagem
+      - name: Resolver imagem
         if: inputs.action == 'deploy'
         env:
-          IMAGE: ${{ inputs.image }}
+          INPUT_IMAGE: ${{ inputs.image }}
         run: |
           set -euo pipefail
 
-          : "${IMAGE:?Informe a imagem para executar o deploy}"
+          IMAGE="${INPUT_IMAGE:-$DEFAULT_APP_IMAGE}"
+          : "${IMAGE:?Nenhuma imagem foi informada e DEFAULT_APP_IMAGE nao esta definida}"
 
           if [[ "$IMAGE" =~ [[:space:]] ]]; then
-            echo "::error::Informe somente a referencia da imagem."
-            echo "::error::Nao use 'docker pull' e nao inclua espacos."
+            echo "::error::Informe somente a referencia da imagem, sem 'docker pull' ou espacos."
             exit 1
           fi
 
           if [[ "$IMAGE" =~ ^[a-z0-9._-]+/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]; then
-            echo "Imagem por digest valida: $IMAGE"
-            exit 0
+            IMAGE_MODE="immutable"
+          elif [[ "$IMAGE" =~ ^[a-z0-9._-]+/[a-z0-9._/-]+:[0-9a-f]{7,40}$ ]]; then
+            IMAGE_MODE="immutable"
+          elif [[ "$IMAGE" =~ ^[a-z0-9._-]+/[a-z0-9._/-]+:latest$ ]]; then
+            IMAGE_MODE="latest"
+            echo "::warning::Usando tag latest. O deploy nao sera reprodutivel."
+          else
+            echo "::error::Formato de imagem invalido."
+            echo "::error::Use usuario/repositorio:<git-sha>, usuario/repositorio@sha256:<digest> ou usuario/repositorio:latest."
+            exit 1
           fi
 
-          if [[ "$IMAGE" =~ ^[a-z0-9._-]+/[a-z0-9._/-]+:[0-9a-f]{7,40}$ ]]; then
-            echo "Imagem com tag Git SHA valida: $IMAGE"
-            exit 0
-          fi
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "IMAGE_MODE=$IMAGE_MODE" >> "$GITHUB_ENV"
+          echo "Imagem resolvida: $IMAGE"
+          echo "Modo: $IMAGE_MODE"
 
-          echo "::error::Formato de imagem invalido."
-          echo "::error::Use usuario/repositorio:<git-sha>"
-          echo "::error::Ou usuario/repositorio@sha256:<digest>"
-          echo "::error::Exemplo: michaelhion/oficina360:70dc080a6f03abadf9abce77641f0e14845ecb66"
-          exit 1
+      - name: Mostrar parametros da execucao
+        run: |
+          echo "action=${{ inputs.action }}"
+          echo "input_image=${{ inputs.image || 'nao informada' }}"
+          echo "default_image=$DEFAULT_APP_IMAGE"
+          echo "branch=${GITHUB_REF_NAME}"
+          echo "commit=${GITHUB_SHA}"
 
       - name: Instalar kubeconform
         if: inputs.action == 'validate'
@@ -90,15 +94,8 @@ jobs:
           curl -fsSLo /tmp/kubeconform.tar.gz \
             "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
 
-          tar -xzf /tmp/kubeconform.tar.gz \
-            -C /tmp \
-            kubeconform
-
-          sudo install \
-            -m 0755 \
-            /tmp/kubeconform \
-            /usr/local/bin/kubeconform
-
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
           kubeconform -v
 
       - name: Validar manifests
@@ -109,7 +106,6 @@ jobs:
           set -euo pipefail
 
           export IMAGE
-
           envsubst '${IMAGE}' \
             < k8s/aws/api-deployment.yaml \
             > /tmp/api-deployment.yaml
@@ -145,6 +141,7 @@ jobs:
           : "${EKS_CLUSTER_ENDPOINT:?Repository Variable EKS_CLUSTER_ENDPOINT nao definida}"
           : "${EKS_CLUSTER_CA:?Repository Variable EKS_CLUSTER_CA nao definida}"
 
+          echo "Endpoint configurado: $EKS_CLUSTER_ENDPOINT"
           bash scripts/configure-eks-kubeconfig.sh
 
       - name: Verificar permissoes Kubernetes
@@ -152,62 +149,38 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Contexto atual:"
           kubectl config current-context
-
-          echo
-          echo "Nodes:"
           kubectl get nodes -o wide
-
-          echo
-          echo "Permissao para consultar namespaces:"
           kubectl auth can-i get namespaces
 
           if [[ "${{ inputs.action }}" == "deploy" ]]; then
-            echo
-            echo "Permissao para criar namespaces:"
             kubectl auth can-i create namespaces
-
-            echo
-            echo "Permissao para criar deployments:"
-            kubectl auth can-i create deployments \
-              --namespace "$NAMESPACE"
+            kubectl auth can-i create deployments --namespace "$NAMESPACE"
           fi
 
       - name: Deploy
         if: inputs.action == 'deploy'
         env:
-          IMAGE: ${{ inputs.image }}
-
           DB_HOST: ${{ vars.DB_HOST }}
           DB_PORT: ${{ vars.DB_PORT }}
           DB_NAME: ${{ vars.DB_NAME }}
-
           DB_USERNAME: ${{ secrets.DB_USERNAME }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
         run: |
           set -euo pipefail
 
-          : "${IMAGE:?Input image nao informado}"
-
+          : "${IMAGE:?Imagem resolvida nao encontrada}"
+          : "${IMAGE_MODE:?Modo da imagem nao encontrado}"
           : "${DB_HOST:?Repository Variable DB_HOST nao definida}"
           : "${DB_PORT:?Repository Variable DB_PORT nao definida}"
           : "${DB_NAME:?Repository Variable DB_NAME nao definida}"
-
           : "${DB_USERNAME:?GitHub Secret DB_USERNAME nao definido}"
           : "${DB_PASSWORD:?GitHub Secret DB_PASSWORD nao definido}"
           : "${JWT_SECRET:?GitHub Secret JWT_SECRET nao definido}"
 
-          echo "===== CRIANDO NAMESPACE ====="
-
-          kubectl apply \
-            -f k8s/aws/namespace.yaml
-
+          kubectl apply -f k8s/aws/namespace.yaml
           kubectl get namespace "$NAMESPACE"
-
-          echo
-          echo "===== CRIANDO CONFIGMAP ====="
 
           kubectl create configmap oficina360-config \
             --namespace "$NAMESPACE" \
@@ -220,9 +193,6 @@ jobs:
             --output yaml |
             kubectl apply -f -
 
-          echo
-          echo "===== CRIANDO SECRET ====="
-
           kubectl create secret generic oficina360-secret \
             --namespace "$NAMESPACE" \
             --from-literal=DB_USERNAME="$DB_USERNAME" \
@@ -232,41 +202,25 @@ jobs:
             --output yaml |
             kubectl apply -f -
 
-          echo
-          echo "===== RENDERIZANDO DEPLOYMENT ====="
-
           export IMAGE
-
           envsubst '${IMAGE}' \
             < k8s/aws/api-deployment.yaml \
             > /tmp/api-deployment.yaml
 
-          echo
-          echo "===== APLICANDO RECURSOS ====="
+          kubectl apply -f /tmp/api-deployment.yaml
+          kubectl apply -f k8s/aws/api-service.yaml
 
-          kubectl apply \
-            -f /tmp/api-deployment.yaml
-
-          kubectl apply \
-            -f k8s/aws/api-service.yaml
-
-          echo
-          echo "===== AGUARDANDO ROLLOUT ====="
+          if [[ "$IMAGE_MODE" == "latest" ]]; then
+            echo "Tag latest detectada. Forcando novo rollout para consultar o registry."
+            kubectl rollout restart \
+              deployment/oficina360-api \
+              --namespace "$NAMESPACE"
+          fi
 
           kubectl rollout status \
             deployment/oficina360-api \
             --namespace "$NAMESPACE" \
             --timeout=5m
-
-          echo
-          echo "===== RECURSOS IMPLANTADOS ====="
-
-          kubectl get deployment,pod,service \
-            --namespace "$NAMESPACE" \
-            --output wide
-
-          echo
-          echo "===== IMAGEM IMPLANTADA ====="
 
           DEPLOYED_IMAGE="$(
             kubectl get deployment oficina360-api \
@@ -274,22 +228,17 @@ jobs:
               --output jsonpath='{.spec.template.spec.containers[0].image}'
           )"
 
-          echo "$DEPLOYED_IMAGE"
+          echo "Imagem solicitada: $IMAGE"
+          echo "Imagem implantada: $DEPLOYED_IMAGE"
 
           if [[ "$DEPLOYED_IMAGE" != "$IMAGE" ]]; then
             echo "::error::Imagem implantada diferente da imagem solicitada."
-            echo "::error::Solicitada: $IMAGE"
-            echo "::error::Implantada: $DEPLOYED_IMAGE"
             exit 1
           fi
 
-          echo
-          echo "===== ESTADO DOS PODS ====="
-
-          kubectl get pods \
+          kubectl get deployment,pod,service \
             --namespace "$NAMESPACE" \
-            --selector app=oficina360-api \
-            --output jsonpath='{range .items[*]}{.metadata.name}{" status="}{.status.phase}{" ready="}{.status.containerStatuses[0].ready}{" restarts="}{.status.containerStatuses[0].restartCount}{"\n"}{end}'
+            --output wide
 
       - name: Verificar deploy
         if: inputs.action == 'deploy'
@@ -297,15 +246,9 @@ jobs:
           set -euo pipefail
 
           kubectl get namespace "$NAMESPACE"
-
-          kubectl get configmap oficina360-config \
-            --namespace "$NAMESPACE"
-
-          kubectl get secret oficina360-secret \
-            --namespace "$NAMESPACE"
-
-          kubectl get service oficina360-api \
-            --namespace "$NAMESPACE"
+          kubectl get configmap oficina360-config --namespace "$NAMESPACE"
+          kubectl get secret oficina360-secret --namespace "$NAMESPACE"
+          kubectl get service oficina360-api --namespace "$NAMESPACE"
 
           kubectl rollout status \
             deployment/oficina360-api \
@@ -324,15 +267,15 @@ jobs:
               --output jsonpath='{.status.availableReplicas}'
           )"
 
-          if [[ "${READY_REPLICAS:-0}" -lt 1 ]]; then
+          [[ "${READY_REPLICAS:-0}" -ge 1 ]] || {
             echo "::error::Deployment sem replicas prontas."
             exit 1
-          fi
+          }
 
-          if [[ "${AVAILABLE_REPLICAS:-0}" -lt 1 ]]; then
+          [[ "${AVAILABLE_REPLICAS:-0}" -ge 1 ]] || {
             echo "::error::Deployment sem replicas disponiveis."
             exit 1
-          fi
+          }
 
           echo "Deploy validado com sucesso."
 
@@ -361,6 +304,7 @@ jobs:
             echo "action=${{ inputs.action }}"
             echo "branch=${GITHUB_REF_NAME}"
             echo "commit=${GITHUB_SHA}"
+            echo "image=${IMAGE:-nao resolvida}"
 
             echo
             echo "===== CONTEXTO ====="
@@ -376,22 +320,19 @@ jobs:
 
             echo
             echo "===== WORKLOADS ====="
-            kubectl get all \
-              --namespace "$NAMESPACE" \
-              --output wide || true
+            kubectl get all --namespace "$NAMESPACE" --output wide || true
 
             echo
             echo "===== CONFIGMAP ====="
-            kubectl get configmap oficina360-config \
-              --namespace "$NAMESPACE" || true
+            kubectl get configmap oficina360-config --namespace "$NAMESPACE" || true
 
             echo
             echo "===== SECRET KEYS ====="
             kubectl get secret oficina360-secret \
               --namespace "$NAMESPACE" \
-              --output jsonpath='{.data}' || true
+              --output json 2>/dev/null |
+              jq -r '.data | keys[]' || true
 
-            echo
             echo
             echo "===== EVENTS ====="
             kubectl get events \
@@ -408,7 +349,6 @@ jobs:
             kubectl describe pods \
               --namespace "$NAMESPACE" \
               --selector app=oficina360-api || true
-
           } > application-diagnostics.txt 2>&1
 
       - name: Publicar diagnostico
