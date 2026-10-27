@@ -234,6 +234,7 @@ jobs:
           echo "Namespaces externos ao Terraform removidos."
 
       - name: Aguardar remocao dos Load Balancers da VPC
+        if: inputs.action == 'destroy'
         timeout-minutes: 10
         env:
           AWS_MAX_ATTEMPTS: "2"
@@ -247,5 +248,62 @@ jobs:
             true
           )"
 
-          if [[ -z "$VPC_ID" ]]; then
-            echo "::error::
+          if [[ -z "$VPC_ID" || "$VPC_ID" == "None" ]]; then
+            echo "::error::Nao foi possivel obter o VPC ID pelos outputs do Terraform."
+            echo "::error::O output vpc_id precisa existir antes do terraform destroy."
+            exit 1
+          fi
+
+          if [[ ! "$VPC_ID" =~ ^vpc-[0-9a-f]+$ ]]; then
+            echo "::error::VPC ID possui formato invalido: $VPC_ID"
+            exit 1
+          fi
+
+          echo "VPC encontrada: $VPC_ID"
+          echo "Aguardando remocao dos Load Balancers da VPC..."
+
+          for attempt in $(seq 1 60); do
+            CLASSIC_COUNT="$(
+              aws elb describe-load-balancers \
+                --region "$AWS_REGION" \
+                --output json 2>/dev/null |
+              jq \
+                --arg vpc_id "$VPC_ID" \
+                '[.LoadBalancerDescriptions[]? |
+                  select(.VPCId == $vpc_id)] |
+                  length'
+            )"
+
+            V2_COUNT="$(
+              aws elbv2 describe-load-balancers \
+                --region "$AWS_REGION" \
+                --output json 2>/dev/null |
+              jq \
+                --arg vpc_id "$VPC_ID" \
+                '[.LoadBalancers[]? |
+                  select(.VpcId == $vpc_id)] |
+                  length'
+            )"
+
+            CLASSIC_COUNT="${CLASSIC_COUNT:-0}"
+            V2_COUNT="${V2_COUNT:-0}"
+            TOTAL_COUNT="$((CLASSIC_COUNT + V2_COUNT))"
+
+            echo "Tentativa $attempt/60:"
+            echo "  Classic Load Balancers: $CLASSIC_COUNT"
+            echo "  ALB/NLB: $V2_COUNT"
+            echo "  Total: $TOTAL_COUNT"
+
+            if [[ "$TOTAL_COUNT" -eq 0 ]]; then
+              echo "Todos os Load Balancers da VPC foram removidos."
+              exit 0
+            fi
+
+            if [[ "$attempt" -lt 60 ]]; then
+              sleep 10
+            fi
+          done
+
+          echo "::error::Ainda existem Load Balancers associados a VPC $VPC_ID."
+          echo "::error::Confira Services LoadBalancer e Ingresses restantes."
+          exit 1
