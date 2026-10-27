@@ -12,10 +12,8 @@ concurrency:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
-
   TF_VAR_aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
   TF_VAR_project_name: oficina360
   TF_VAR_kubernetes_version: "1.36"
@@ -24,7 +22,7 @@ jobs:
   destroy:
     name: Infrastructure Destroy
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     defaults:
       run:
@@ -57,7 +55,6 @@ jobs:
         working-directory: .
         run: |
           set -euo pipefail
-
           aws sts get-caller-identity
 
       - name: Configurar roles EKS
@@ -82,29 +79,26 @@ jobs:
             exit 1
           fi
 
-          echo "TF_VAR_eks_cluster_role_arn=$EKS_CLUSTER_ROLE_ARN" \
-            >> "$GITHUB_ENV"
-
-          echo "TF_VAR_eks_node_role_arn=$EKS_NODE_ROLE_ARN" \
-            >> "$GITHUB_ENV"
-
-          echo "Roles EKS configuradas pelas Repository Variables."
+          echo "TF_VAR_eks_cluster_role_arn=$EKS_CLUSTER_ROLE_ARN" >> "$GITHUB_ENV"
+          echo "TF_VAR_eks_node_role_arn=$EKS_NODE_ROLE_ARN" >> "$GITHUB_ENV"
 
       - name: Configurar backend
         timeout-minutes: 1
         working-directory: .
         env:
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_STATE_KEY: ${{ vars.TF_STATE_KEY || 'oficina360/lab.tfstate' }}
         run: |
           set -euo pipefail
 
           : "${TF_STATE_BUCKET:?Repository Variable TF_STATE_BUCKET nao definida}"
+          : "${TF_STATE_KEY:?Repository Variable TF_STATE_KEY nao definida}"
 
-          echo "TF_STATE_BUCKET=$TF_STATE_BUCKET" \
-            >> "$GITHUB_ENV"
+          echo "TF_STATE_BUCKET=$TF_STATE_BUCKET" >> "$GITHUB_ENV"
+          echo "TF_STATE_KEY=$TF_STATE_KEY" >> "$GITHUB_ENV"
 
-          echo "Backend configurado: $TF_STATE_BUCKET"
-          echo "State key: oficina360/lab.tfstate"
+          echo "Backend bucket: $TF_STATE_BUCKET"
+          echo "Backend key: $TF_STATE_KEY"
 
       - name: Terraform init
         timeout-minutes: 5
@@ -117,7 +111,7 @@ jobs:
 
           terraform init -reconfigure \
             -backend-config="bucket=$TF_STATE_BUCKET" \
-            -backend-config="key=oficina360/lab.tfstate" \
+            -backend-config="key=$TF_STATE_KEY" \
             -backend-config="region=$AWS_REGION" \
             -backend-config="use_lockfile=true"
 
@@ -126,8 +120,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          terraform state list \
-            > /tmp/terraform-state-resources.txt
+          terraform state list > /tmp/terraform-state-resources.txt
 
           echo "===== RECURSOS NO STATE ====="
           cat /tmp/terraform-state-resources.txt
@@ -138,27 +131,20 @@ jobs:
             exit 1
           fi
 
-          if ! grep -q '^aws_eks_cluster\.main$' \
-            /tmp/terraform-state-resources.txt; then
-
+          grep -qx 'aws_eks_cluster.main' /tmp/terraform-state-resources.txt || {
             echo "::error::O state nao contem aws_eks_cluster.main."
-            echo "::error::Destroy interrompido para evitar usar o backend errado."
             exit 1
-          fi
+          }
 
-          if ! grep -q '^aws_eks_node_group\.main$' \
-            /tmp/terraform-state-resources.txt; then
-
+          grep -qx 'aws_eks_node_group.main' /tmp/terraform-state-resources.txt || {
             echo "::error::O state nao contem aws_eks_node_group.main."
             exit 1
-          fi
+          }
 
-          if ! grep -q '^module\.vpc\.' \
-            /tmp/terraform-state-resources.txt; then
-
+          grep -q '^module\.vpc\.' /tmp/terraform-state-resources.txt || {
             echo "::error::O state nao contem recursos do modulo VPC."
             exit 1
-          fi
+          }
 
           echo "State remoto validado."
 
@@ -166,8 +152,22 @@ jobs:
         timeout-minutes: 2
         run: |
           set -euo pipefail
-
           terraform validate
+
+      - name: Salvar VPC ID antes da limpeza
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+
+          VPC_ID="$(terraform output -raw vpc_id)"
+
+          if [[ ! "$VPC_ID" =~ ^vpc-[0-9a-f]+$ ]]; then
+            echo "::error::VPC ID possui formato invalido: $VPC_ID"
+            exit 1
+          fi
+
+          echo "VPC_ID=$VPC_ID" >> "$GITHUB_ENV"
+          echo "VPC encontrada: $VPC_ID"
 
       - name: Configurar cluster sem DescribeCluster
         timeout-minutes: 3
@@ -186,7 +186,7 @@ jobs:
           bash scripts/configure-eks-kubeconfig.sh
 
       - name: Remover releases Helm
-        timeout-minutes: 10
+        timeout-minutes: 15
         working-directory: .
         run: |
           set -u
@@ -195,16 +195,15 @@ jobs:
             local release="$1"
             local namespace="$2"
 
-            if helm status "$release" \
-              --namespace "$namespace" \
-              >/dev/null 2>&1; then
-
+            if helm status "$release" --namespace "$namespace" >/dev/null 2>&1; then
               echo "Removendo release $release do namespace $namespace..."
 
               helm uninstall "$release" \
                 --namespace "$namespace" \
                 --wait \
-                --timeout 5m
+                --timeout 5m || {
+                  echo "::warning::Falha ao remover release $release; a limpeza dos namespaces continuara."
+                }
             else
               echo "Release $release nao existe em $namespace."
             fi
@@ -215,25 +214,102 @@ jobs:
           uninstall_release loki observability
           uninstall_release kong kong
 
-      - name: Remover namespaces Kubernetes
-        timeout-minutes: 10
+      - name: Remover namespaces externos ao Terraform
+        timeout-minutes: 12
         working-directory: .
         run: |
           set -euo pipefail
 
-          kubectl delete namespace observability \
-            --ignore-not-found=true \
-            --wait=true \
-            --timeout=5m
+          for namespace in observability kong oficina360; do
+            echo "Solicitando remocao do namespace $namespace..."
+            kubectl delete namespace "$namespace" \
+              --ignore-not-found=true \
+              --wait=false
+          done
 
-          kubectl delete namespace kong \
-            --ignore-not-found=true \
-            --wait=true \
-            --timeout=5m
+          for attempt in $(seq 1 60); do
+            remaining=0
 
-          echo "Namespaces externos ao Terraform removidos."
+            for namespace in observability kong oficina360; do
+              if kubectl get namespace "$namespace" >/dev/null 2>&1; then
+                echo "Namespace ainda presente: $namespace"
+                remaining=$((remaining + 1))
+              fi
+            done
+
+            if [[ "$remaining" -eq 0 ]]; then
+              echo "Namespaces externos ao Terraform removidos."
+              exit 0
+            fi
+
+            if [[ "$attempt" -lt 60 ]]; then
+              sleep 10
+            fi
+          done
+
+          echo "::error::Um ou mais namespaces nao foram removidos no prazo."
+          kubectl get namespaces || true
+          exit 1
 
       - name: Aguardar remocao dos Load Balancers da VPC
+        timeout-minutes: 12
+        env:
+          AWS_MAX_ATTEMPTS: "2"
+          AWS_RETRY_MODE: standard
+          AWS_PAGER: ""
+        run: |
+          set -euo pipefail
+
+          : "${VPC_ID:?VPC_ID nao foi salvo antes da limpeza}"
+
+          echo "Aguardando remocao dos Load Balancers da VPC $VPC_ID..."
+
+          for attempt in $(seq 1 60); do
+            CLASSIC_JSON="$(
+              aws elb describe-load-balancers \
+                --region "$AWS_REGION" \
+                --output json 2>/tmp/classic-lb-error.txt ||
+              printf '{"LoadBalancerDescriptions":[]}'
+            )"
+
+            V2_JSON="$(
+              aws elbv2 describe-load-balancers \
+                --region "$AWS_REGION" \
+                --output json 2>/tmp/v2-lb-error.txt ||
+              printf '{"LoadBalancers":[]}'
+            )"
+
+            CLASSIC_COUNT="$(
+              jq --arg vpc_id "$VPC_ID" \
+                '[.LoadBalancerDescriptions[]? | select(.VPCId == $vpc_id)] | length' \
+                <<< "$CLASSIC_JSON"
+            )"
+
+            V2_COUNT="$(
+              jq --arg vpc_id "$VPC_ID" \
+                '[.LoadBalancers[]? | select(.VpcId == $vpc_id)] | length' \
+                <<< "$V2_JSON"
+            )"
+
+            TOTAL_COUNT="$((CLASSIC_COUNT + V2_COUNT))"
+
+            echo "Tentativa $attempt/60: Classic=$CLASSIC_COUNT ALB/NLB=$V2_COUNT Total=$TOTAL_COUNT"
+
+            if [[ "$TOTAL_COUNT" -eq 0 ]]; then
+              echo "Todos os Load Balancers da VPC foram removidos."
+              exit 0
+            fi
+
+            if [[ "$attempt" -lt 60 ]]; then
+              sleep 10
+            fi
+          done
+
+          echo "::error::Ainda existem Load Balancers associados a VPC $VPC_ID."
+          echo "::error::Confira Services LoadBalancer e Ingresses restantes."
+          exit 1
+
+      - name: Gerar plano de destroy
         timeout-minutes: 10
         env:
           AWS_MAX_ATTEMPTS: "2"
@@ -242,10 +318,88 @@ jobs:
         run: |
           set -euo pipefail
 
-          VPC_ID="$(
-            terraform output -raw vpc_id 2>/dev/null ||
-            true
-          )"
+          terraform plan \
+            -destroy \
+            -out=destroy.tfplan
 
-          if [[ -z "$VPC_ID" ]]; then
-            echo "::error::
+          terraform show \
+            -no-color \
+            destroy.tfplan \
+            > /tmp/terraform-destroy-plan.txt
+
+          cat /tmp/terraform-destroy-plan.txt
+
+          if ! grep -Eq '(aws_eks_cluster\.main.*will be destroyed|# aws_eks_cluster\.main will be destroyed)' \
+            /tmp/terraform-destroy-plan.txt; then
+            echo "::error::O plano nao inclui a destruicao de aws_eks_cluster.main."
+            exit 1
+          fi
+
+          echo "Plano de destroy validado."
+
+      - name: Aplicar destroy
+        timeout-minutes: 35
+        env:
+          AWS_MAX_ATTEMPTS: "2"
+          AWS_RETRY_MODE: standard
+          AWS_PAGER: ""
+        run: |
+          set -euo pipefail
+          terraform apply -auto-approve destroy.tfplan
+
+      - name: Confirmar state vazio
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+
+          terraform state list > /tmp/terraform-state-after-destroy.txt
+
+          if [[ -s /tmp/terraform-state-after-destroy.txt ]]; then
+            echo "::error::Ainda existem recursos no Terraform state:"
+            cat /tmp/terraform-state-after-destroy.txt
+            exit 1
+          fi
+
+          echo "State vazio. Infraestrutura destruida com sucesso."
+
+      - name: Gerar diagnostico
+        if: always()
+        working-directory: .
+        run: |
+          {
+            echo "===== EXECUCAO ====="
+            echo "workflow=${GITHUB_WORKFLOW}"
+            echo "branch=${GITHUB_REF_NAME}"
+            echo "commit=${GITHUB_SHA}"
+            echo "region=${AWS_REGION}"
+            echo "vpc_id=${VPC_ID:-nao-obtido}"
+
+            echo
+            echo "===== STATE ANTES ====="
+            cat /tmp/terraform-state-resources.txt 2>/dev/null || true
+
+            echo
+            echo "===== PLANO DE DESTROY ====="
+            tail -n 200 /tmp/terraform-destroy-plan.txt 2>/dev/null || true
+
+            echo
+            echo "===== STATE DEPOIS ====="
+            cat /tmp/terraform-state-after-destroy.txt 2>/dev/null || true
+
+            echo
+            echo "===== ERRO CLASSIC LB ====="
+            cat /tmp/classic-lb-error.txt 2>/dev/null || true
+
+            echo
+            echo "===== ERRO ELBV2 ====="
+            cat /tmp/v2-lb-error.txt 2>/dev/null || true
+          } > infrastructure-destroy-diagnostics.txt 2>&1
+
+      - name: Publicar diagnostico
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: infrastructure-destroy-diagnostics
+          path: infrastructure-destroy-diagnostics.txt
+          if-no-files-found: warn
+          retention-days: 1
